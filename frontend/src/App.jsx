@@ -1,34 +1,53 @@
-import { Routes, Route, Link } from "react-router-dom";
-
-import Login from "./pages/Login";
-import Signup from "./pages/Signup";
+import { Routes, Route, Navigate } from "react-router-dom";
+import Login from "./pages/auth/Login";
 import Dashboard from "./pages/Dashboard";
-import ProtectedRoute from "./components/ProtectedRoute";
+import Vehicles from "./pages/vehicles/Vehicles";
+import LiveTracking from "./pages/vehicles/LiveTracking";
+import Drivers from "./pages/drivers/Drivers";
+import Shipments from "./pages/shipments/Shipments";
+import Trips from "./pages/trips/Trips";
+import Maintenance from "./pages/maintenance/Maintenance";
+import FuelRecords from "./pages/fuel/FuelRecords";
+import Notifications from "./pages/notifications/Notifications";
+import Attendance from "./pages/attendance/Attendance";
 
-function App() {
+export default function App() {
   return (
-    <>
-      <nav className="bg-blue-600 text-white p-4 flex justify-center gap-6">
-        <Link to="/">Login</Link>
-        <Link to="/signup">Signup</Link>
-      </nav>
+    <Routes>
+      {/* AUTH */}
+      <Route path="/login" element={<Login />} />
 
-      <Routes>
-        <Route path="/" element={<Login />} />
+      {/* DASHBOARD */}
+      <Route path="/dashboard" element={<Dashboard />} />
 
-        <Route path="/signup" element={<Signup />} />
+      {/* VEHICLES */}
+      <Route path="/vehicles" element={<Vehicles />} />
+      <Route path="/live-tracking" element={<LiveTracking />} />
 
-        <Route
-          path="/dashboard"
-          element={
-            <ProtectedRoute>
-              <Dashboard />
-            </ProtectedRoute>
-          }
-        />
-      </Routes>
-    </>
+      {/* DRIVERS */}
+      <Route path="/drivers" element={<Drivers />} />
+
+      {/* SHIPMENTS */}
+      <Route path="/shipments" element={<Shipments />} />
+
+      {/* TRIPS */}
+      <Route path="/trips" element={<Trips />} />
+
+      {/* MAINTENANCE */}
+      <Route path="/maintenance" element={<Maintenance />} />
+
+      {/* FUEL */}
+      <Route path="/fuel" element={<FuelRecords />} />
+
+      {/* NOTIFICATIONS */}
+      <Route path="/notifications" element={<Notifications />} />
+
+      {/* ATTENDANCE */}
+      <Route path="/attendance" element={<Attendance />} />
+
+      {/* ROOT & FALLBACK */}
+      <Route path="/" element={<Navigate to="/login" replace />} />
+      <Route path="*" element={<Navigate to="/login" replace />} />
+    </Routes>
   );
 }
-
-export default App;
