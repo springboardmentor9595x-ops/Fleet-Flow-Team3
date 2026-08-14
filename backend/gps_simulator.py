@@ -1,81 +1,161 @@
 import asyncio
 import json
+import urllib.request
+import urllib.error
 
-import websockets
+# ================================================================
+# FleetFlow Multi-Vehicle GPS Simulator
+# Fetches all vehicles from the API and simulates GPS for each
+# ================================================================
 
+BASE_URL = "http://127.0.0.1:8000"
+WS_BASE  = "ws://127.0.0.1:8000"
 
-import sys
+# Default credentials — change if needed
+EMAIL    = "admin@fleetflow.com"
+PASSWORD = "pass123"
 
-VEHICLE_ID = sys.argv[1] if len(sys.argv) > 1 else "72793178-ddc6-45d5-96ad-91457c1c31fb"
+# Simulation route (loops endlessly): lat, lon, speed_km/h
+ROUTE = [
+    (28.6139, 77.2090, 20),
+    (28.6150, 77.2110, 30),
+    (28.6162, 77.2130, 40),
+    (28.6175, 77.2150, 35),
+    (28.6188, 77.2170, 45),
+    (28.6200, 77.2190, 50),
+    (28.6188, 77.2210, 40),
+    (28.6175, 77.2190, 35),
+    (28.6162, 77.2170, 30),
+    (28.6150, 77.2150, 25),
+]
 
-WS_URL = f"ws://127.0.0.1:8000/ws/tracking/{VEHICLE_ID}"
-
-
-GPS_POINTS = [
-    (28.4744, 77.5040, 20),
-    (28.4746, 77.5043, 25),
-    (28.4749, 77.5047, 30),
-    (28.4752, 77.5051, 35),
-    (28.4755, 77.5055, 40),
-    (28.4758, 77.5059, 35),
+# Small per-vehicle offset so markers don't stack on top of each other
+OFFSETS = [
+    (0.000,  0.000),
+    (0.002,  0.003),
+    (-0.002, 0.004),
+    (0.004, -0.002),
+    (-0.003,-0.003),
 ]
 
 
-async def main():
+def get_token():
+    """Login and return JWT token."""
+    import urllib.parse
+    data = urllib.parse.urlencode({
+        "username": EMAIL,
+        "password": PASSWORD,
+    }).encode()
+    req = urllib.request.Request(
+        f"{BASE_URL}/auth/login",
+        data=data,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    with urllib.request.urlopen(req) as res:
+        return json.loads(res.read())["access_token"]
 
-    print("Connecting to FleetFlow WebSocket...")
 
-    try:
-        async with websockets.connect(
-            WS_URL,
-            ping_interval=20,
-            ping_timeout=20,
-            close_timeout=5,
-        ) as websocket:
+def get_vehicles(token):
+    """Fetch all vehicle IDs and registration numbers."""
+    req = urllib.request.Request(
+        f"{BASE_URL}/vehicles/",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    with urllib.request.urlopen(req) as res:
+        vehicles = json.loads(res.read())
+    return [(v["vehicle_id"], v.get("registration_number", v["vehicle_id"])) for v in vehicles]
 
-            print("Connected to FleetFlow WebSocket")
-            print("Starting GPS simulation...\n")
 
-            while True:
-                for latitude, longitude, speed in GPS_POINTS:
+async def simulate_vehicle(vehicle_id, reg_number, offset, delay_start):
+    """Simulate GPS for a single vehicle."""
+    import websockets
 
-                    gps_data = {
-                        "latitude": latitude,
-                        "longitude": longitude,
-                        "speed": speed,
-                        "recorded_time": "2026-08-11T18:00:00",
+    ws_url = f"{WS_BASE}/ws/tracking/{vehicle_id}"
+    lat_off, lon_off = offset
+    await asyncio.sleep(delay_start)  # stagger starts
+
+    while True:
+        try:
+            print(f"[{reg_number}] Connecting to {ws_url}")
+            async with websockets.connect(
+                ws_url,
+                ping_interval=20,
+                ping_timeout=20,
+                close_timeout=5,
+            ) as ws:
+                print(f"[{reg_number}] Connected ✅")
+                idx = 0
+                while True:
+                    lat, lon, speed = ROUTE[idx % len(ROUTE)]
+                    payload = {
+                        "latitude":  round(lat + lat_off, 6),
+                        "longitude": round(lon + lon_off, 6),
+                        "speed":     speed,
+                        "recorded_time": "2026-08-14T00:00:00",
                     }
-
-                    # Send GPS data
-                    await websocket.send(
-                        json.dumps(gps_data)
-                    )
-
-                    print("GPS sent:", speed, "km/h")
-
-                    # Wait briefly for backend response
+                    await ws.send(json.dumps(payload))
+                    print(f"[{reg_number}] GPS → lat={payload['latitude']}, lon={payload['longitude']}, speed={speed} km/h")
                     try:
-                        response = await asyncio.wait_for(
-                            websocket.recv(),
-                            timeout=3,
-                        )
-
+                        resp = await asyncio.wait_for(ws.recv(), timeout=3)
+                        data = json.loads(resp)
+                        if data.get("event"):
+                            print(f"[{reg_number}] 🔔 Event: {data['event']}")
                     except asyncio.TimeoutError:
                         pass
-
-                    # Wait before next GPS point
+                    idx += 1
                     await asyncio.sleep(2)
 
-    except websockets.exceptions.ConnectionClosed as error:
-        print(
-            f"\nWebSocket connection closed: {error}"
-        )
+        except Exception as e:
+            print(f"[{reg_number}] ❌ Error: {e}. Reconnecting in 3s...")
+            await asyncio.sleep(3)
 
-    except Exception as error:
-        print(
-            f"\nGPS simulator error: {error}"
-        )
+
+async def main():
+    print("=" * 60)
+    print("  FleetFlow Multi-Vehicle GPS Simulator")
+    print("=" * 60)
+
+    try:
+        token = get_token()
+        print(f"✅ Logged in as {EMAIL}")
+    except Exception as e:
+        print(f"❌ Login failed: {e}")
+        print("   Check that the backend is running and credentials are correct.")
+        return
+
+    try:
+        vehicles = get_vehicles(token)
+    except Exception as e:
+        print(f"❌ Failed to fetch vehicles: {e}")
+        return
+
+    if not vehicles:
+        print("⚠️  No vehicles found. Register vehicles first via /vehicles/.")
+        return
+
+    print(f"\nFound {len(vehicles)} vehicle(s):")
+    for vid, reg in vehicles:
+        print(f"  • {reg}  ({vid})")
+
+    print("\nStarting GPS simulation for all vehicles...\n")
+
+    tasks = []
+    for i, (vid, reg) in enumerate(vehicles):
+        offset = OFFSETS[i % len(OFFSETS)]
+        # Stagger starts by 0.5s per vehicle
+        task = asyncio.create_task(simulate_vehicle(vid, reg, offset, delay_start=i * 0.5))
+        tasks.append(task)
+
+    await asyncio.gather(*tasks)
 
 
 if __name__ == "__main__":
+    try:
+        import websockets
+    except ImportError:
+        print("Installing websockets...")
+        import subprocess, sys
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "websockets"])
+        import websockets
+
     asyncio.run(main())

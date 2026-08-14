@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, ForeignKey, String, Float, DateTime
+from sqlalchemy import Column, ForeignKey, String, Float, DateTime, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from app.database import Base
 
@@ -21,3 +21,4 @@ class VehicleMaintenance(Base):
     remarks = Column(String(500), nullable=True)
     status = Column(String(50), default="Scheduled")
     performed_by = Column(String(100), nullable=True)
+    alert_sent = Column(Boolean, default=False)

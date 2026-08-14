@@ -1,12 +1,19 @@
 import math
+import json
+import asyncio
+import os
 from datetime import datetime
 
+import redis.asyncio as redis
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
 from sqlalchemy.orm import Session
+from dotenv import load_dotenv
 
 from app.database import get_db
 from app.models.gps_tracking import GPSTracking
 
+load_dotenv()
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
 router = APIRouter(
     prefix="/ws",
@@ -15,7 +22,7 @@ router = APIRouter(
 
 
 # ============================================================
-# CONNECTION MANAGER
+# CONNECTION MANAGER (Redis Pub/Sub)
 # ============================================================
 
 class ConnectionManager:
@@ -23,73 +30,71 @@ class ConnectionManager:
     def __init__(self):
         # vehicle_id -> list of connected WebSockets
         self.active_connections = {}
+        self.redis = redis.from_url(REDIS_URL)
 
     async def connect(self, websocket: WebSocket, vehicle_id: str):
         await websocket.accept()
 
+        is_new_vehicle = False
         if vehicle_id not in self.active_connections:
             self.active_connections[vehicle_id] = []
+            is_new_vehicle = True
 
         self.active_connections[vehicle_id].append(websocket)
+        
+        if is_new_vehicle:
+            asyncio.create_task(self._listen_to_redis(vehicle_id))
 
         print(
-            f"WebSocket connected: vehicle={vehicle_id}"
-        )
-
-        print(
-            f"Active connections for vehicle "
-            f"{vehicle_id}: "
-            f"{len(self.active_connections[vehicle_id])}"
+            f"WebSocket connected: vehicle={vehicle_id}. "
+            f"Active connections: {len(self.active_connections[vehicle_id])}"
         )
 
     def disconnect(self, websocket: WebSocket, vehicle_id: str):
+        if vehicle_id in self.active_connections:
+            if websocket in self.active_connections[vehicle_id]:
+                self.active_connections[vehicle_id].remove(websocket)
+            
+            if not self.active_connections[vehicle_id]:
+                del self.active_connections[vehicle_id]
 
-        if vehicle_id not in self.active_connections:
-            return
+        print(f"WebSocket disconnected: vehicle={vehicle_id}")
 
-        if websocket in self.active_connections[vehicle_id]:
-            self.active_connections[vehicle_id].remove(websocket)
+    async def _listen_to_redis(self, vehicle_id: str):
+        pubsub = self.redis.pubsub()
+        await pubsub.subscribe(f"tracking:{vehicle_id}")
+        print(f"Subscribed to Redis channel: tracking:{vehicle_id}")
+        
+        try:
+            async for message in pubsub.listen():
+                if message["type"] == "message":
+                    data = json.loads(message["data"])
+                    connections = self.active_connections.get(vehicle_id, [])
+                    disconnected = []
+                    
+                    for connection in connections:
+                        try:
+                            await connection.send_json(data)
+                        except Exception as error:
+                            print(f"Local broadcast error: {error}")
+                            disconnected.append(connection)
+                            
+                    for connection in disconnected:
+                        self.disconnect(connection, vehicle_id)
+                        
+                # Exit the listener task if there are no local connections anymore
+                if vehicle_id not in self.active_connections:
+                    break
+        except Exception as e:
+            print(f"Redis listener error for {vehicle_id}: {e}")
+        finally:
+            await pubsub.unsubscribe(f"tracking:{vehicle_id}")
+            await pubsub.close()
+            print(f"Unsubscribed from Redis channel: tracking:{vehicle_id}")
 
-        if not self.active_connections[vehicle_id]:
-            del self.active_connections[vehicle_id]
-
-        print(
-            f"WebSocket disconnected: vehicle={vehicle_id}"
-        )
-
-    async def broadcast(
-        self,
-        vehicle_id: str,
-        data: dict,
-    ):
-        connections = self.active_connections.get(
-            vehicle_id,
-            []
-        )
-
-        print(
-            f"Broadcasting GPS update to "
-            f"{len(connections)} connection(s)"
-        )
-
-        disconnected = []
-
-        for connection in connections:
-
-            try:
-                await connection.send_json(data)
-
-            except Exception as error:
-                print(
-                    f"Broadcast error: {error}"
-                )
-
-                disconnected.append(connection)
-
-        for connection in disconnected:
-
-            if connection in connections:
-                connections.remove(connection)
+    async def broadcast(self, vehicle_id: str, data: dict):
+        print(f"Publishing GPS update to Redis channel tracking:{vehicle_id}")
+        await self.redis.publish(f"tracking:{vehicle_id}", json.dumps(data))
 
 
 manager = ConnectionManager()

@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useEffect, useRef, useState, useCallback } from "react";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import api from "../../api/axios";
 
 import {
@@ -14,1070 +14,860 @@ import {
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
-const DESTINATION = [28.4744, 77.5040];
+// ================================================================
+// CONSTANTS
+// ================================================================
+
+const DESTINATION = [28.6200, 77.2190];
 const GEOFENCE_RADIUS = 500;
+const WS_BASE = `ws://${window.location.hostname}:8000`;
 
-// ============================================================
-// VEHICLE ICON
-// ============================================================
+// ================================================================
+// NUMBERED VEHICLE ICON (SVG label with reg number)
+// ================================================================
 
-const vehicleIcon = new L.Icon({
+function makeVehicleIcon(label, isSelected) {
+  const bg = isSelected ? "#6366f1" : "#22c55e";
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="44" height="52">
+      <rect x="2" y="2" width="40" height="28" rx="6" ry="6"
+        fill="${bg}" stroke="white" stroke-width="2"/>
+      <text x="22" y="20" text-anchor="middle"
+        font-family="Arial,sans-serif" font-size="11" font-weight="bold"
+        fill="white">${label}</text>
+      <polygon points="14,29 30,29 22,44" fill="${bg}"/>
+    </svg>`;
+
+  return L.divIcon({
+    html: svg,
+    className: "",
+    iconSize: [44, 52],
+    iconAnchor: [22, 52],
+    popupAnchor: [0, -54],
+  });
+}
+
+const destinationIcon = new L.Icon({
   iconUrl:
-    "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png",
-
+    "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png",
   shadowUrl:
     "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
-
   iconSize: [25, 41],
   iconAnchor: [12, 41],
   popupAnchor: [1, -34],
 });
 
-// ============================================================
-// MAP UPDATER
-// ============================================================
+// ================================================================
+// MAP AUTO-FIT — fits all vehicle markers in view
+// ================================================================
 
-function MapUpdater({ gpsData }) {
+function MapFitter({ positions, focusPosition }) {
   const map = useMap();
 
   useEffect(() => {
-    if (
-      gpsData?.latitude !== undefined &&
-      gpsData?.longitude !== undefined &&
-      gpsData?.latitude !== null &&
-      gpsData?.longitude !== null
-    ) {
-      map.setView(
-        [gpsData.latitude, gpsData.longitude],
-        16,
-        {
-          animate: true,
-        }
-      );
+    if (focusPosition) {
+      map.setView(focusPosition, 16, { animate: true });
+      return;
     }
-  }, [gpsData, map]);
+    const pts = Object.values(positions).filter(
+      (p) => p?.latitude != null && p?.longitude != null
+    );
+    if (pts.length === 0) return;
+    if (pts.length === 1) {
+      map.setView([pts[0].latitude, pts[0].longitude], 15, { animate: true });
+      return;
+    }
+    const bounds = L.latLngBounds(
+      pts.map((p) => [p.latitude, p.longitude])
+    );
+    map.fitBounds(bounds, { padding: [60, 60], animate: true });
+  }, [positions, focusPosition, map]);
 
   return null;
 }
 
-// ============================================================
-// LIVE TRACKING
-// ============================================================
+// ================================================================
+// MAIN COMPONENT
+// ================================================================
 
 export default function LiveTracking() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
 
-  const vehicleId = searchParams.get("vehicle_id");
+  // Selected vehicle ID (from URL param or user click)
+  const [selectedId, setSelectedId] = useState(
+    searchParams.get("vehicle_id") || null
+  );
 
-  const socketRef = useRef(null);
-  const reconnectTimerRef = useRef(null);
+  // All vehicles from API
+  const [vehicles, setVehicles] = useState([]);
+  const [loadingVehicles, setLoadingVehicles] = useState(true);
+
+  // GPS data keyed by vehicle_id
+  const [gpsMap, setGpsMap] = useState({});
+
+  // WebSocket refs keyed by vehicle_id
+  const socketsRef = useRef({});
+  const timersRef = useRef({});
   const mountedRef = useRef(true);
 
-  const [gpsData, setGpsData] = useState(null);
-
-  const [connectionStatus, setConnectionStatus] =
-    useState("Connecting...");
-
-  const [error, setError] = useState("");
-  const [vehicle, setVehicle] = useState(null);
+  // ============================================================
+  // LOAD ALL VEHICLES
+  // ============================================================
 
   useEffect(() => {
-    if (vehicleId) {
-      api.get(`/vehicles/${vehicleId}`)
-        .then((res) => {
-          setVehicle(res.data);
-        })
-        .catch((err) => {
-          console.error("Failed to fetch vehicle:", err);
-        });
-    }
-  }, [vehicleId]);
+    api
+      .get("/vehicles/")
+      .then((res) => {
+        setVehicles(res.data);
+        setLoadingVehicles(false);
+      })
+      .catch(() => setLoadingVehicles(false));
+  }, []);
 
-  // ==========================================================
-  // WEBSOCKET
-  // ==========================================================
+  // ============================================================
+  // CONNECT / DISCONNECT WS PER VEHICLE
+  // ============================================================
 
-  useEffect(() => {
-    mountedRef.current = true;
+  const connectWs = useCallback((vehicle) => {
+    const vid = vehicle.vehicle_id;
+    if (!mountedRef.current) return;
 
-    if (!vehicleId) {
-      setConnectionStatus("Vehicle ID missing");
-      setError("No vehicle was selected.");
+    const existing = socketsRef.current[vid];
+    if (
+      existing &&
+      (existing.readyState === WebSocket.OPEN ||
+        existing.readyState === WebSocket.CONNECTING)
+    ) {
       return;
     }
 
-    let cancelled = false;
+    const url = `${WS_BASE}/ws/tracking/${vid}`;
+    const ws = new WebSocket(url);
+    socketsRef.current[vid] = ws;
 
-    const connectWebSocket = () => {
-      if (cancelled || !mountedRef.current) {
-        return;
-      }
-
-      // Prevent duplicate connections
-      if (
-        socketRef.current &&
-        (
-          socketRef.current.readyState === WebSocket.OPEN ||
-          socketRef.current.readyState === WebSocket.CONNECTING
-        )
-      ) {
-        console.log(
-          "WebSocket already connected/connecting"
-        );
-
-        return;
-      }
-
-      const host =
-        window.location.hostname || "127.0.0.1";
-
-      const wsUrl =
-        `ws://${host}:8000/ws/tracking/${vehicleId}`;
-
-      console.log(
-        "===================================="
-      );
-
-      console.log(
-        "Connecting to FleetFlow WebSocket"
-      );
-
-      console.log(
-        "Vehicle ID:",
-        vehicleId
-      );
-
-      console.log(
-        "WebSocket URL:",
-        wsUrl
-      );
-
-      console.log(
-        "===================================="
-      );
-
-      setConnectionStatus("Connecting...");
-
-      const socket = new WebSocket(wsUrl);
-
-      socketRef.current = socket;
-
-      // ------------------------------------------------------
-      // OPEN
-      // ------------------------------------------------------
-
-      socket.onopen = () => {
-        if (
-          cancelled ||
-          !mountedRef.current
-        ) {
-          return;
-        }
-
-        console.log(
-          "✅ FleetFlow WebSocket connected"
-        );
-
-        console.log(
-          "Tracking vehicle:",
-          vehicleId
-        );
-
-        setConnectionStatus("Connected");
-
-        // Remove old connection error
-        setError("");
-      };
-
-      // ------------------------------------------------------
-      // MESSAGE
-      // ------------------------------------------------------
-
-      socket.onmessage = (event) => {
-        if (
-          cancelled ||
-          !mountedRef.current
-        ) {
-          return;
-        }
-
-        console.log(
-          "📡 Live GPS update:",
-          event.data
-        );
-
-        try {
-          const data = JSON.parse(
-            event.data
-          );
-
-          // Backend error
-          if (data.error) {
-            console.error(
-              "FleetFlow server error:",
-              data.error
-            );
-
-            setError(data.error);
-
-            return;
-          }
-
-          console.log(
-            "Vehicle position:",
-            data.latitude,
-            data.longitude
-          );
-
-          console.log(
-            "Vehicle speed:",
-            data.speed
-          );
-
-          console.log(
-            "Distance:",
-            data.distance_to_destination
-          );
-
-          console.log(
-            "Geofence:",
-            data.inside_geofence
-          );
-
-          setGpsData(data);
-
-          // Successful GPS data means
-          // the connection is working.
-          setConnectionStatus("Connected");
-
-          setError("");
-
-        } catch (err) {
-          console.error(
-            "Invalid WebSocket data:",
-            err
-          );
-        }
-      };
-
-      // ------------------------------------------------------
-      // ERROR
-      // ------------------------------------------------------
-
-      socket.onerror = (event) => {
-        if (
-          cancelled ||
-          !mountedRef.current
-        ) {
-          return;
-        }
-
-        console.error(
-          "❌ FleetFlow WebSocket error:",
-          event
-        );
-
-        /*
-         * Do NOT immediately show
-         * "Unable to connect".
-         *
-         * WebSocket can fire error before
-         * the close event.
-         */
-
-        setConnectionStatus(
-          "Connection error"
-        );
-      };
-
-      // ------------------------------------------------------
-      // CLOSE
-      // ------------------------------------------------------
-
-      socket.onclose = (event) => {
-        if (
-          cancelled ||
-          !mountedRef.current
-        ) {
-          return;
-        }
-
-        console.log(
-          "🔴 FleetFlow WebSocket disconnected"
-        );
-
-        console.log(
-          "Close code:",
-          event.code
-        );
-
-        console.log(
-          "Close reason:",
-          event.reason
-        );
-
-        setConnectionStatus(
-          "Disconnected"
-        );
-
-        socketRef.current = null;
-
-        /*
-         * Automatically reconnect.
-         *
-         * This is important because the
-         * backend may restart when using
-         * uvicorn --reload.
-         */
-
-        if (!cancelled) {
-          reconnectTimerRef.current =
-            setTimeout(() => {
-              console.log(
-                "🔄 Reconnecting to FleetFlow..."
-              );
-
-              connectWebSocket();
-            }, 2000);
-        }
-      };
+    ws.onopen = () => {
+      console.log(`✅ WS connected: ${vehicle.registration_number}`);
     };
 
-    // First connection
-    connectWebSocket();
+    ws.onmessage = (evt) => {
+      if (!mountedRef.current) return;
+      try {
+        const data = JSON.parse(evt.data);
+        if (!data.error) {
+          setGpsMap((prev) => ({ ...prev, [vid]: data }));
+        }
+      } catch (_) {}
+    };
 
-    // ------------------------------------------------------
-    // CLEANUP
-    // ------------------------------------------------------
+    ws.onerror = () => {
+      console.warn(`WS error: ${vehicle.registration_number}`);
+    };
+
+    ws.onclose = () => {
+      if (!mountedRef.current) return;
+      socketsRef.current[vid] = null;
+      // Auto-reconnect after 3s
+      timersRef.current[vid] = setTimeout(
+        () => connectWs(vehicle),
+        3000
+      );
+    };
+  }, []);
+
+  // Open WS for every vehicle when list loads
+  useEffect(() => {
+    if (vehicles.length === 0) return;
+    mountedRef.current = true;
+    vehicles.forEach((v) => connectWs(v));
 
     return () => {
-      console.log(
-        "Cleaning up vehicle WebSocket"
-      );
-
-      cancelled = true;
-
       mountedRef.current = false;
-
-      if (reconnectTimerRef.current) {
-        clearTimeout(
-          reconnectTimerRef.current
-        );
-
-        reconnectTimerRef.current = null;
-      }
-
-      if (socketRef.current) {
-        const socket =
-          socketRef.current;
-
-        socketRef.current = null;
-
-        /*
-         * Remove handlers before closing
-         * so React cleanup does not trigger
-         * unnecessary reconnect logic.
-         */
-
-        socket.onopen = null;
-        socket.onmessage = null;
-        socket.onerror = null;
-        socket.onclose = null;
-
-        if (
-          socket.readyState ===
-            WebSocket.OPEN ||
-          socket.readyState ===
-            WebSocket.CONNECTING
-        ) {
-          socket.close();
+      Object.values(timersRef.current).forEach(clearTimeout);
+      Object.values(socketsRef.current).forEach((ws) => {
+        if (ws) {
+          ws.onopen = null;
+          ws.onmessage = null;
+          ws.onerror = null;
+          ws.onclose = null;
+          if (
+            ws.readyState === WebSocket.OPEN ||
+            ws.readyState === WebSocket.CONNECTING
+          ) {
+            ws.close();
+          }
         }
-      }
+      });
     };
+  }, [vehicles, connectWs]);
 
-  }, [vehicleId]);
+  // ============================================================
+  // DERIVED HELPERS
+  // ============================================================
 
-  // ==========================================================
-  // HELPERS
-  // ==========================================================
+  const selectedVehicle = vehicles.find(
+    (v) => v.vehicle_id === selectedId
+  );
+  const selectedGps = selectedId ? gpsMap[selectedId] : null;
 
-  const hasLocation =
-    gpsData &&
-    gpsData.latitude !== null &&
-    gpsData.longitude !== null &&
-    gpsData.latitude !== undefined &&
-    gpsData.longitude !== undefined;
+  const connectedCount = Object.values(gpsMap).filter(
+    (d) => d?.latitude != null
+  ).length;
 
-  const isInsideGeofence =
-    gpsData?.inside_geofence === true;
+  // Map focus: if vehicle selected + has GPS → centre on it
+  const focusPos =
+    selectedGps?.latitude != null
+      ? [selectedGps.latitude, selectedGps.longitude]
+      : null;
 
-  const status =
-    gpsData?.status || "Waiting";
-
-  // ==========================================================
+  // ============================================================
   // UI
-  // ==========================================================
+  // ============================================================
 
   return (
     <div style={styles.page}>
 
-      {/* ================================================== */}
+      {/* ====================================================== */}
       {/* HEADER */}
-      {/* ================================================== */}
+      {/* ====================================================== */}
 
       <div style={styles.header}>
-
         <div>
-          <h1 style={styles.title}>
-            Live Vehicle Tracking
-          </h1>
-
+          <h1 style={styles.title}>Live Fleet Tracking</h1>
           <p style={styles.subtitle}>
-            Real-time GPS monitoring and geofence tracking
+            Real-time GPS for all {vehicles.length} vehicle
+            {vehicles.length !== 1 ? "s" : ""} ·{" "}
+            <span style={{ color: "#22c55e", fontWeight: 600 }}>
+              {connectedCount} live
+            </span>
           </p>
         </div>
 
-        <div
-          style={{
-            ...styles.connectionBadge,
-
-            ...(connectionStatus === "Connected"
-              ? styles.connected
-              : connectionStatus === "Connecting..."
-              ? styles.connecting
-              : styles.disconnected),
-          }}
-        >
-          <span style={styles.statusDot} />
-
-          {connectionStatus}
+        <div style={styles.legendRow}>
+          <span style={styles.legendDot("#22c55e")} /> Active GPS
+          <span style={{ ...styles.legendDot("#6366f1"), marginLeft: 16 }} />
+          Selected
+          <span style={{ ...styles.legendDot("#94a3b8"), marginLeft: 16 }} />
+          No signal
         </div>
-
       </div>
 
-      {/* ================================================== */}
-      {/* VEHICLE INFORMATION */}
-      {/* ================================================== */}
+      {/* ====================================================== */}
+      {/* FLEET OVERVIEW STATS */}
+      {/* ====================================================== */}
 
-      <div style={styles.vehicleCard}>
-
-        <div>
-
-          <div style={styles.cardLabel}>
-            REGISTRATION NUMBER
-          </div>
-
-          <div style={styles.vehicleId}>
-            {vehicle?.registration_number || vehicleId || "Not selected"}
-          </div>
-
-        </div>
-
-        <div>
-
-          <div style={styles.cardLabel}>
-            STATUS
-          </div>
-
-          <div
-            style={{
-              ...styles.statusBadge,
-
-              ...(status === "Arrived"
-                ? styles.arrived
-                : styles.enRoute),
-            }}
-          >
-            {status}
-          </div>
-
-        </div>
-
+      <div style={styles.statsRow}>
+        <StatBubble
+          value={vehicles.length}
+          label="Total"
+          color="#6366f1"
+        />
+        <StatBubble
+          value={connectedCount}
+          label="Live GPS"
+          color="#22c55e"
+        />
+        <StatBubble
+          value={
+            vehicles.filter((v) => v.status === "In Transit").length
+          }
+          label="In Transit"
+          color="#f59e0b"
+        />
+        <StatBubble
+          value={
+            vehicles.filter((v) => v.status === "Available").length
+          }
+          label="Available"
+          color="#3b82f6"
+        />
+        <StatBubble
+          value={
+            vehicles.filter((v) => v.status === "Maintenance").length
+          }
+          label="Maintenance"
+          color="#ef4444"
+        />
       </div>
 
-      {/* ================================================== */}
-      {/* ERROR */}
-      {/* ================================================== */}
+      <div style={styles.body}>
 
-      {error && (
-        <div style={styles.errorBox}>
-          {error}
-        </div>
-      )}
+        {/* ================================================== */}
+        {/* LEFT — VEHICLE LIST PANEL */}
+        {/* ================================================== */}
 
-      {/* ================================================== */}
-      {/* LIVE STATISTICS */}
-      {/* ================================================== */}
-
-      <div style={styles.statsGrid}>
-
-        <StatCard
-          label="Speed"
-          value={
-            gpsData?.speed !== undefined
-              ? `${gpsData.speed} km/h`
-              : "--"
-          }
-        />
-
-        <StatCard
-          label="Distance to Destination"
-          value={
-            gpsData?.distance_to_destination !==
-            undefined
-              ? `${gpsData.distance_to_destination} m`
-              : "--"
-          }
-        />
-
-        <StatCard
-          label="Geofence Radius"
-          value={`${GEOFENCE_RADIUS} m`}
-        />
-
-        <StatCard
-          label="Geofence"
-          value={
-            gpsData
-              ? gpsData.inside_geofence
-                ? "Inside"
-                : "Outside"
-              : "--"
-          }
-        />
-
-      </div>
-
-      {/* ================================================== */}
-      {/* MAP */}
-      {/* ================================================== */}
-
-      <div style={styles.mapCard}>
-
-        <div style={styles.mapHeader}>
-
-          <div>
-
-            <h2 style={styles.mapTitle}>
-              Live Vehicle Map
-            </h2>
-
-            <p style={styles.mapSubtitle}>
-              Vehicle position updates automatically
-            </p>
-
+        <div style={styles.sidebar}>
+          <div style={styles.sidebarHeader}>
+            Fleet Vehicles
+            {loadingVehicles && (
+              <span style={styles.loadingDot}>Loading…</span>
+            )}
           </div>
 
-          {gpsData && (
-            <div
-              style={{
-                ...styles.eventBadge,
+          {vehicles.length === 0 && !loadingVehicles && (
+            <div style={styles.emptyMsg}>
+              No vehicles found. Register a vehicle first.
+            </div>
+          )}
 
-                ...(isInsideGeofence
-                  ? styles.eventArrived
-                  : styles.eventEnRoute),
-              }}
+          {vehicles.map((v, idx) => {
+            const gps = gpsMap[v.vehicle_id];
+            const hasGps = gps?.latitude != null;
+            const isSelected = v.vehicle_id === selectedId;
+
+            return (
+              <div
+                key={v.vehicle_id}
+                style={{
+                  ...styles.vehicleItem,
+                  ...(isSelected ? styles.vehicleItemSelected : {}),
+                }}
+                onClick={() =>
+                  setSelectedId(isSelected ? null : v.vehicle_id)
+                }
+              >
+                {/* Number badge */}
+                <div
+                  style={{
+                    ...styles.numBadge,
+                    background: isSelected ? "#6366f1" : hasGps ? "#22c55e" : "#94a3b8",
+                  }}
+                >
+                  {idx + 1}
+                </div>
+
+                <div style={styles.vehicleInfo}>
+                  <div style={styles.vehicleReg}>
+                    {v.registration_number}
+                  </div>
+                  <div style={styles.vehicleType}>
+                    {v.vehicle_type} · {v.brand}
+                  </div>
+                  <div
+                    style={{
+                      ...styles.vehicleStatus,
+                      color: statusColor(v.status),
+                    }}
+                  >
+                    {v.status}
+                  </div>
+                </div>
+
+                <div style={styles.gpsPill(hasGps)}>
+                  {hasGps ? "● LIVE" : "○ Wait"}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* ================================================== */}
+        {/* RIGHT — MAP + DETAIL */}
+        {/* ================================================== */}
+
+        <div style={styles.mainPanel}>
+
+          {/* MAP */}
+          <div style={styles.mapCard}>
+            <div style={styles.mapHeader}>
+              <h2 style={styles.mapTitle}>
+                {selectedVehicle
+                  ? `Tracking: ${selectedVehicle.registration_number}`
+                  : "Fleet Overview Map"}
+              </h2>
+              <p style={styles.mapSubtitle}>
+                {selectedVehicle
+                  ? "Click the map sidebar entry to deselect"
+                  : "Click a vehicle in the list to focus"}
+              </p>
+            </div>
+
+            <MapContainer
+              center={DESTINATION}
+              zoom={13}
+              style={styles.map}
             >
-              {gpsData.event || "GPS update"}
+              <TileLayer
+                attribution="© OpenStreetMap contributors"
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              />
+
+              <MapFitter
+                positions={gpsMap}
+                focusPosition={focusPos}
+              />
+
+              {/* Destination geofence */}
+              <Circle
+                center={DESTINATION}
+                radius={GEOFENCE_RADIUS}
+                pathOptions={{
+                  color: "#6366f1",
+                  fillColor: "#6366f1",
+                  fillOpacity: 0.08,
+                  weight: 2,
+                }}
+              />
+              <Marker position={DESTINATION} icon={destinationIcon}>
+                <Popup>
+                  <strong>FleetFlow HQ / Destination</strong>
+                  <br />
+                  Geofence: {GEOFENCE_RADIUS} m
+                </Popup>
+              </Marker>
+
+              {/* All vehicles with GPS */}
+              {vehicles.map((v, idx) => {
+                const gps = gpsMap[v.vehicle_id];
+                if (!gps?.latitude || !gps?.longitude) return null;
+                const isSelected = v.vehicle_id === selectedId;
+
+                // Short label: last 6 chars of reg or just number
+                const label =
+                  v.registration_number?.slice(-6) || `V${idx + 1}`;
+
+                return (
+                  <Marker
+                    key={v.vehicle_id}
+                    position={[gps.latitude, gps.longitude]}
+                    icon={makeVehicleIcon(label, isSelected)}
+                    eventHandlers={{
+                      click: () => setSelectedId(v.vehicle_id),
+                    }}
+                  >
+                    <Popup>
+                      <div style={{ minWidth: 180 }}>
+                        <h3 style={{ margin: "0 0 6px" }}>
+                          {v.registration_number}
+                        </h3>
+                        <table style={{ width: "100%", fontSize: 12 }}>
+                          <tbody>
+                            <tr>
+                              <td><b>Type</b></td>
+                              <td>{v.vehicle_type}</td>
+                            </tr>
+                            <tr>
+                              <td><b>Status</b></td>
+                              <td style={{ color: statusColor(v.status) }}>
+                                {v.status}
+                              </td>
+                            </tr>
+                            <tr>
+                              <td><b>Speed</b></td>
+                              <td>{gps.speed} km/h</td>
+                            </tr>
+                            <tr>
+                              <td><b>Distance</b></td>
+                              <td>{gps.distance_to_destination ?? "--"} m</td>
+                            </tr>
+                            <tr>
+                              <td><b>Geofence</b></td>
+                              <td>
+                                {gps.inside_geofence ? "✅ Inside" : "Outside"}
+                              </td>
+                            </tr>
+                            <tr>
+                              <td><b>Lat</b></td>
+                              <td>{gps.latitude}</td>
+                            </tr>
+                            <tr>
+                              <td><b>Lon</b></td>
+                              <td>{gps.longitude}</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </Popup>
+                  </Marker>
+                );
+              })}
+            </MapContainer>
+          </div>
+
+          {/* SELECTED VEHICLE DETAIL PANEL */}
+          {selectedVehicle ? (
+            <div style={styles.detailCard}>
+              <h2 style={styles.detailTitle}>
+                {selectedVehicle.registration_number} — Live Detail
+              </h2>
+
+              {!selectedGps ? (
+                <div style={styles.waiting}>
+                  ⏳ Waiting for GPS signal from{" "}
+                  {selectedVehicle.registration_number}…
+                  <br />
+                  <small>
+                    Run the GPS simulator:{" "}
+                    <code>python gps_simulator.py</code>
+                  </small>
+                </div>
+              ) : (
+                <div style={styles.detailGrid}>
+                  <DetailItem label="Speed" value={`${selectedGps.speed} km/h`} />
+                  <DetailItem
+                    label="Distance to Dest."
+                    value={
+                      selectedGps.distance_to_destination != null
+                        ? `${selectedGps.distance_to_destination} m`
+                        : "--"
+                    }
+                  />
+                  <DetailItem
+                    label="Geofence"
+                    value={
+                      selectedGps.inside_geofence
+                        ? "✅ Inside (Arrived)"
+                        : "Outside"
+                    }
+                  />
+                  <DetailItem
+                    label="Status"
+                    value={selectedGps.status || selectedVehicle.status}
+                  />
+                  <DetailItem label="Latitude" value={selectedGps.latitude} />
+                  <DetailItem label="Longitude" value={selectedGps.longitude} />
+                  <DetailItem
+                    label="Event"
+                    value={selectedGps.event || "GPS update"}
+                  />
+                  <DetailItem
+                    label="Recorded"
+                    value={
+                      selectedGps.recorded_time
+                        ? new Date(selectedGps.recorded_time).toLocaleTimeString()
+                        : "--"
+                    }
+                  />
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={styles.hintCard}>
+              <span style={{ fontSize: 32 }}>🗺️</span>
+              <p>
+                Select a vehicle from the left panel to view its live
+                GPS detail
+              </p>
             </div>
           )}
 
         </div>
-
-        <MapContainer
-          center={DESTINATION}
-          zoom={15}
-          style={styles.map}
-        >
-
-          <TileLayer
-            attribution="&copy; OpenStreetMap contributors"
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
-
-          <MapUpdater
-            gpsData={gpsData}
-          />
-
-          {/* DESTINATION / GEOFENCE */}
-
-          <Circle
-            center={DESTINATION}
-            radius={GEOFENCE_RADIUS}
-            pathOptions={{
-              color: "blue",
-              fillColor: "blue",
-              fillOpacity: 0.08,
-              weight: 2,
-            }}
-          />
-
-          {/* DESTINATION MARKER */}
-
-          <Marker
-            position={DESTINATION}
-          >
-            <Popup>
-              <strong>
-                FleetFlow Destination
-              </strong>
-
-              <br />
-
-              Geofence:
-              {" "}
-              {GEOFENCE_RADIUS} m
-            </Popup>
-          </Marker>
-
-          {/* VEHICLE */}
-
-          {hasLocation && (
-            <Marker
-              position={[
-                gpsData.latitude,
-                gpsData.longitude,
-              ]}
-              icon={vehicleIcon}
-            >
-
-              <Popup>
-
-                <div style={styles.popup}>
-
-                  <h3>
-                    FleetFlow Vehicle
-                  </h3>
-
-                  <p>
-                    <strong>
-                      Registration:
-                    </strong>{" "}
-                    {vehicle?.registration_number || gpsData.vehicle_id}
-                  </p>
-
-                  <p>
-                    <strong>
-                      Speed:
-                    </strong>{" "}
-                    {gpsData.speed} km/h
-                  </p>
-
-                  <p>
-                    <strong>
-                      Distance:
-                    </strong>{" "}
-                    {gpsData.distance_to_destination} m
-                  </p>
-
-                  <p>
-                    <strong>
-                      Status:
-                    </strong>{" "}
-                    {gpsData.status}
-                  </p>
-
-                  <p>
-                    <strong>
-                      Geofence:
-                    </strong>{" "}
-                    {gpsData.inside_geofence
-                      ? "Inside"
-                      : "Outside"}
-                  </p>
-
-                  <p>
-                    <strong>
-                      Latitude:
-                    </strong>{" "}
-                    {gpsData.latitude}
-                  </p>
-
-                  <p>
-                    <strong>
-                      Longitude:
-                    </strong>{" "}
-                    {gpsData.longitude}
-                  </p>
-
-                </div>
-
-              </Popup>
-
-            </Marker>
-          )}
-
-        </MapContainer>
-
       </div>
-
-      {/* ================================================== */}
-      {/* GPS DETAILS */}
-      {/* ================================================== */}
-
-      <div style={styles.detailsCard}>
-
-        <h2 style={styles.detailsTitle}>
-          Vehicle GPS Details
-        </h2>
-
-        {!gpsData ? (
-
-          <div style={styles.waiting}>
-
-            {connectionStatus ===
-            "Connected"
-              ? "Connected. Waiting for GPS data..."
-              : "Waiting for FleetFlow tracking connection..."}
-
-          </div>
-
-        ) : (
-
-          <div style={styles.detailsGrid}>
-
-            <Detail
-              label="Registration"
-              value={vehicle?.registration_number || gpsData.vehicle_id}
-            />
-
-            <Detail
-              label="Latitude"
-              value={gpsData.latitude}
-            />
-
-            <Detail
-              label="Longitude"
-              value={gpsData.longitude}
-            />
-
-            <Detail
-              label="Speed"
-              value={`${gpsData.speed} km/h`}
-            />
-
-            <Detail
-              label="Distance"
-              value={`${gpsData.distance_to_destination} m`}
-            />
-
-            <Detail
-              label="Geofence"
-              value={
-                gpsData.inside_geofence
-                  ? "Inside"
-                  : "Outside"
-              }
-            />
-
-            <Detail
-              label="Status"
-              value={gpsData.status}
-            />
-
-            <Detail
-              label="Recorded Time"
-              value={gpsData.recorded_time}
-            />
-
-          </div>
-
-        )}
-
-      </div>
-
     </div>
   );
 }
 
-// ============================================================
-// STAT CARD
-// ============================================================
+// ================================================================
+// SUB-COMPONENTS
+// ================================================================
 
-function StatCard({
-  label,
-  value,
-}) {
+function StatBubble({ value, label, color }) {
   return (
-    <div style={styles.statCard}>
-
-      <div style={styles.statLabel}>
-        {label}
-      </div>
-
-      <div style={styles.statValue}>
-        {value}
-      </div>
-
+    <div style={styles.statBubble}>
+      <div style={{ ...styles.statValue, color }}>{value}</div>
+      <div style={styles.statLabel}>{label}</div>
     </div>
   );
 }
 
-// ============================================================
-// DETAIL
-// ============================================================
-
-function Detail({
-  label,
-  value,
-}) {
+function DetailItem({ label, value }) {
   return (
     <div style={styles.detailItem}>
-
-      <div style={styles.detailLabel}>
-        {label}
-      </div>
-
-      <div style={styles.detailValue}>
-        {value}
-      </div>
-
+      <div style={styles.detailLabel}>{label}</div>
+      <div style={styles.detailValue}>{value ?? "--"}</div>
     </div>
   );
 }
 
-// ============================================================
+// ================================================================
+// HELPERS
+// ================================================================
+
+function statusColor(status) {
+  switch (status) {
+    case "Available":  return "#22c55e";
+    case "In Transit": return "#f59e0b";
+    case "Assigned":   return "#3b82f6";
+    case "Maintenance":return "#ef4444";
+    default:           return "#94a3b8";
+  }
+}
+
+// ================================================================
 // STYLES
-// ============================================================
+// ================================================================
 
 const styles = {
-
   page: {
     minHeight: "100vh",
-    padding: "30px 40px",
-    background: "#f4f7fb",
+    background: "#f8fafc",
+    fontFamily: "'Inter', 'Segoe UI', sans-serif",
+    padding: "24px",
     boxSizing: "border-box",
   },
 
   header: {
     display: "flex",
+    alignItems: "flex-start",
     justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: "25px",
+    marginBottom: 16,
+    flexWrap: "wrap",
+    gap: 12,
   },
 
   title: {
+    fontSize: 26,
+    fontWeight: 700,
+    color: "#0f172a",
     margin: 0,
-    fontSize: "30px",
-    fontWeight: "700",
-    color: "#172554",
   },
 
   subtitle: {
-    marginTop: "7px",
+    fontSize: 14,
     color: "#64748b",
+    margin: "4px 0 0",
   },
 
-  connectionBadge: {
+  legendRow: {
     display: "flex",
     alignItems: "center",
-    gap: "8px",
-    padding: "8px 14px",
-    borderRadius: "20px",
-    fontSize: "13px",
-    fontWeight: "600",
-  },
-
-  connected: {
-    background: "#dcfce7",
-    color: "#166534",
-  },
-
-  connecting: {
-    background: "#dbeafe",
-    color: "#1d4ed8",
-  },
-
-  disconnected: {
-    background: "#fee2e2",
-    color: "#991b1b",
-  },
-
-  statusDot: {
-    width: "8px",
-    height: "8px",
-    borderRadius: "50%",
-    background: "currentColor",
-  },
-
-  vehicleCard: {
-    background: "white",
-    padding: "20px 25px",
-    borderRadius: "12px",
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    boxShadow:
-      "0 4px 15px rgba(0,0,0,0.05)",
-    marginBottom: "20px",
-  },
-
-  cardLabel: {
-    fontSize: "11px",
-    fontWeight: "700",
+    fontSize: 13,
     color: "#64748b",
-    marginBottom: "5px",
-    letterSpacing: "0.5px",
+    gap: 4,
   },
 
-  vehicleId: {
-    fontSize: "14px",
-    fontWeight: "600",
-    color: "#334155",
-  },
-
-  statusBadge: {
+  legendDot: (color) => ({
     display: "inline-block",
-    padding: "7px 14px",
-    borderRadius: "20px",
-    fontSize: "13px",
-    fontWeight: "700",
+    width: 10,
+    height: 10,
+    borderRadius: "50%",
+    background: color,
+    marginRight: 4,
+  }),
+
+  statsRow: {
+    display: "flex",
+    gap: 12,
+    marginBottom: 20,
+    flexWrap: "wrap",
   },
 
-  arrived: {
-    background: "#dcfce7",
-    color: "#166534",
-  },
-
-  enRoute: {
-    background: "#dbeafe",
-    color: "#1d4ed8",
-  },
-
-  errorBox: {
-    background: "#fee2e2",
-    color: "#991b1b",
-    padding: "14px 18px",
-    borderRadius: "8px",
-    marginBottom: "20px",
-  },
-
-  statsGrid: {
-    display: "grid",
-    gridTemplateColumns:
-      "repeat(4, 1fr)",
-    gap: "18px",
-    marginBottom: "20px",
-  },
-
-  statCard: {
+  statBubble: {
     background: "white",
-    padding: "20px",
-    borderRadius: "12px",
-    boxShadow:
-      "0 4px 15px rgba(0,0,0,0.05)",
-  },
-
-  statLabel: {
-    fontSize: "13px",
-    color: "#64748b",
-    marginBottom: "8px",
+    borderRadius: 12,
+    padding: "12px 20px",
+    boxShadow: "0 1px 4px rgba(0,0,0,.08)",
+    minWidth: 80,
+    textAlign: "center",
   },
 
   statValue: {
-    fontSize: "23px",
-    fontWeight: "700",
-    color: "#172554",
+    fontSize: 28,
+    fontWeight: 700,
+  },
+
+  statLabel: {
+    fontSize: 11,
+    color: "#94a3b8",
+    textTransform: "uppercase",
+    letterSpacing: 1,
+  },
+
+  body: {
+    display: "flex",
+    gap: 20,
+    alignItems: "flex-start",
+  },
+
+  sidebar: {
+    width: 280,
+    flexShrink: 0,
+    background: "white",
+    borderRadius: 14,
+    boxShadow: "0 1px 6px rgba(0,0,0,.08)",
+    overflow: "hidden",
+  },
+
+  sidebarHeader: {
+    padding: "14px 16px",
+    fontWeight: 700,
+    fontSize: 14,
+    color: "#0f172a",
+    background: "#f1f5f9",
+    borderBottom: "1px solid #e2e8f0",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+
+  loadingDot: {
+    fontSize: 11,
+    color: "#94a3b8",
+  },
+
+  emptyMsg: {
+    padding: 20,
+    fontSize: 13,
+    color: "#94a3b8",
+    textAlign: "center",
+  },
+
+  vehicleItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    padding: "10px 14px",
+    cursor: "pointer",
+    borderBottom: "1px solid #f1f5f9",
+    transition: "background 0.15s",
+  },
+
+  vehicleItemSelected: {
+    background: "#eef2ff",
+    borderLeft: "3px solid #6366f1",
+  },
+
+  numBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: "50%",
+    color: "white",
+    fontWeight: 700,
+    fontSize: 13,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+
+  vehicleInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+
+  vehicleReg: {
+    fontWeight: 700,
+    fontSize: 13,
+    color: "#0f172a",
+  },
+
+  vehicleType: {
+    fontSize: 11,
+    color: "#94a3b8",
+  },
+
+  vehicleStatus: {
+    fontSize: 11,
+    fontWeight: 600,
+    marginTop: 2,
+  },
+
+  gpsPill: (active) => ({
+    fontSize: 10,
+    fontWeight: 700,
+    padding: "3px 7px",
+    borderRadius: 99,
+    color: active ? "#16a34a" : "#94a3b8",
+    background: active ? "#dcfce7" : "#f1f5f9",
+    whiteSpace: "nowrap",
+  }),
+
+  mainPanel: {
+    flex: 1,
+    minWidth: 0,
+    display: "flex",
+    flexDirection: "column",
+    gap: 16,
   },
 
   mapCard: {
     background: "white",
-    borderRadius: "12px",
+    borderRadius: 14,
+    boxShadow: "0 1px 6px rgba(0,0,0,.08)",
     overflow: "hidden",
-    boxShadow:
-      "0 4px 15px rgba(0,0,0,0.05)",
-    marginBottom: "20px",
   },
 
   mapHeader: {
-    padding: "20px 25px",
+    padding: "14px 20px",
+    borderBottom: "1px solid #e2e8f0",
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
-    borderBottom:
-      "1px solid #e5e7eb",
   },
 
   mapTitle: {
+    fontSize: 16,
+    fontWeight: 700,
+    color: "#0f172a",
     margin: 0,
-    fontSize: "20px",
-    color: "#172554",
   },
 
   mapSubtitle: {
-    margin: "5px 0 0",
-    fontSize: "13px",
-    color: "#64748b",
-  },
-
-  eventBadge: {
-    padding: "8px 12px",
-    borderRadius: "8px",
-    fontSize: "12px",
-    fontWeight: "600",
-  },
-
-  eventArrived: {
-    background: "#dcfce7",
-    color: "#166534",
-  },
-
-  eventEnRoute: {
-    background: "#dbeafe",
-    color: "#1d4ed8",
+    fontSize: 12,
+    color: "#94a3b8",
+    margin: 0,
   },
 
   map: {
-    height: "500px",
+    height: 460,
     width: "100%",
   },
 
-  popup: {
-    minWidth: "190px",
-  },
-
-  detailsCard: {
+  detailCard: {
     background: "white",
-    padding: "25px",
-    borderRadius: "12px",
-    boxShadow:
-      "0 4px 15px rgba(0,0,0,0.05)",
+    borderRadius: 14,
+    boxShadow: "0 1px 6px rgba(0,0,0,.08)",
+    padding: "20px 24px",
   },
 
-  detailsTitle: {
-    marginTop: 0,
-    color: "#172554",
+  detailTitle: {
+    fontSize: 16,
+    fontWeight: 700,
+    color: "#0f172a",
+    margin: "0 0 16px",
   },
 
-  detailsGrid: {
+  detailGrid: {
     display: "grid",
-    gridTemplateColumns:
-      "repeat(4, 1fr)",
-    gap: "20px",
+    gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
+    gap: 12,
   },
 
   detailItem: {
-    padding: "15px",
     background: "#f8fafc",
-    borderRadius: "8px",
+    borderRadius: 10,
+    padding: "10px 14px",
   },
 
   detailLabel: {
-    fontSize: "12px",
-    color: "#64748b",
-    marginBottom: "6px",
+    fontSize: 10,
+    textTransform: "uppercase",
+    color: "#94a3b8",
+    letterSpacing: 1,
+    marginBottom: 4,
   },
 
   detailValue: {
-    fontSize: "14px",
-    fontWeight: "600",
-    color: "#334155",
-    wordBreak: "break-word",
+    fontSize: 15,
+    fontWeight: 600,
+    color: "#0f172a",
   },
 
   waiting: {
-    padding: "30px",
     textAlign: "center",
-    color: "#64748b",
+    padding: 24,
+    color: "#94a3b8",
+    fontSize: 14,
+    lineHeight: 1.7,
+  },
+
+  hintCard: {
+    background: "white",
+    borderRadius: 14,
+    boxShadow: "0 1px 6px rgba(0,0,0,.08)",
+    padding: "32px 24px",
+    textAlign: "center",
+    color: "#94a3b8",
+    fontSize: 14,
   },
 };
