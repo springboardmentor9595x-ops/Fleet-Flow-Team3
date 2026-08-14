@@ -24,15 +24,62 @@ FleetFlow is a Fleet Management System developed using FastAPI, React, and Postg
 fleetflow/
 ├── backend/
 │   ├── app/
+│   │   ├── __init__.py
+│   │   ├── main.py
+│   │   ├── database.py
+│   │   ├── config.py
+│   │   ├── models/
+│   │   │   ├── __init__.py
+│   │   │   ├── user.py
+│   │   │   ├── driver.py
+│   │   │   ├── vehicle.py
+│   │   │   ├── shipment.py
+│   │   │   ├── trip.py
+│   │   │   ├── gps_tracking.py
+│   │   │   ├── maintenance.py
+│   │   │   ├── fuel_record.py
+│   │   │   ├── notification.py
+│   │   │   └── attendance.py
+│   │   ├── schemas/
+│   │   │   ├── __init__.py
+│   │   │   └── user.py
+│   │   ├── routers/
+│   │   │   ├── __init__.py
+│   │   │   └── auth.py
+│   │   ├── core/
+│   │   │   ├── __init__.py
+│   │   │   ├── security.py
+│   │   │   └── deps.py
+│   │   └── crud/
+│   │       ├── __init__.py
+│   │       └── user.py
 │   ├── alembic/
+│   │   └── versions/
+│   ├── alembic.ini
 │   ├── requirements.txt
-│   └── alembic.ini
-├── frontend/
-│   ├── src/
-│   ├── public/
-│   ├── package.json
-│   └── vite.config.js
-└── README.md
+│   ├── .env
+│   └── .gitignore
+└── frontend/
+    ├── public/
+    ├── src/
+    │   ├── api/
+    │   │   └── axios.js
+    │   ├── components/
+    │   │   └── auth/
+    │   │       ├── LoginForm.jsx
+    │   │       └── SignupForm.jsx
+    │   ├── context/
+    │   │   └── AuthContext.jsx
+    │   ├── pages/
+    │   │   ├── Login.jsx
+    │   │   ├── Signup.jsx
+    │   │   └── Dashboard.jsx
+    │   ├── routes/
+    │   │   └── ProtectedRoute.jsx
+    │   ├── App.jsx
+    │   └── main.jsx
+    ├── package.json
+    └── .env
 ```
 
 ## Features
