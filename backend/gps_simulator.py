@@ -110,6 +110,13 @@ async def simulate_vehicle(vehicle_id, reg_number, offset, delay_start):
             await asyncio.sleep(3)
 
 
+import sys
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 async def main():
     print("=" * 60)
     print("  FleetFlow Multi-Vehicle GPS Simulator")
@@ -118,9 +125,17 @@ async def main():
     try:
         token = get_token()
         print(f"✅ Logged in as {EMAIL}")
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            print(f"❌ Login failed: HTTP 401 Unauthorized")
+            print(f"   The user '{EMAIL}' does not exist or wrong password.")
+            print(f"   Please sign up with email '{EMAIL}' and password '{PASSWORD}' in the Frontend Dashboard, then create a vehicle.")
+        else:
+            print(f"❌ Login failed: {e}")
+        return
     except Exception as e:
         print(f"❌ Login failed: {e}")
-        print("   Check that the backend is running and credentials are correct.")
+        print("   Check that the backend is running.")
         return
 
     try:
