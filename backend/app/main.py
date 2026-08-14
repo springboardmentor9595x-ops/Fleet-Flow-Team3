@@ -7,11 +7,13 @@ from app.routers import vehicle
 from app.routers import driver
 from app.routers import shipment
 from app.routers import trip
+from app.routers import route
 from app.routers import maintenance
 from app.routers import fuel
 from app.routers import notification
 from app.routers import attendance
 from app.routers import websocket
+from app.routers import analytics
 
 
 # ============================================================
@@ -62,70 +64,108 @@ app.include_router(
 # USERS ROUTER
 # ============================================================
 
-app.include_router(user.router)
+app.include_router(
+    user.router
+)
 
 
 # ============================================================
 # VEHICLE ROUTER
 # ============================================================
 
-app.include_router(vehicle.router)
+app.include_router(
+    vehicle.router
+)
 
 
 # ============================================================
 # DRIVER ROUTER
 # ============================================================
 
-app.include_router(driver.router)
+app.include_router(
+    driver.router
+)
 
 
 # ============================================================
 # SHIPMENT ROUTER
 # ============================================================
 
-app.include_router(shipment.router)
+app.include_router(
+    shipment.router
+)
 
 
 # ============================================================
 # TRIP ROUTER
 # ============================================================
 
-app.include_router(trip.router)
+app.include_router(
+    trip.router
+)
+
+
+# ============================================================
+# ROUTE OPTIMIZATION ROUTER
+# ============================================================
+
+app.include_router(
+    route.router
+)
 
 
 # ============================================================
 # MAINTENANCE ROUTER
 # ============================================================
 
-app.include_router(maintenance.router)
+app.include_router(
+    maintenance.router
+)
 
 
 # ============================================================
 # FUEL RECORDS ROUTER
 # ============================================================
 
-app.include_router(fuel.router)
+app.include_router(
+    fuel.router
+)
 
 
 # ============================================================
 # NOTIFICATIONS ROUTER
 # ============================================================
 
-app.include_router(notification.router)
+app.include_router(
+    notification.router
+)
 
 
 # ============================================================
 # ATTENDANCE ROUTER
 # ============================================================
 
-app.include_router(attendance.router)
+app.include_router(
+    attendance.router
+)
 
 
 # ============================================================
 # WEBSOCKET ROUTER
 # ============================================================
 
-app.include_router(websocket.router)
+app.include_router(
+    websocket.router
+)
+
+
+# ============================================================
+# ANALYTICS ROUTER
+# ============================================================
+
+app.include_router(
+    analytics.router
+)
 
 
 # ============================================================

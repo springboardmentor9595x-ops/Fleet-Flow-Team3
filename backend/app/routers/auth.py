@@ -6,7 +6,7 @@ from app.database import get_db
 from app.schemas.user import UserCreate, UserOut, Token
 from app.crud.user import get_user_by_email, create_user
 from app.core.security import verify_password, create_access_token
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_roles
 from app.models.user import User
 
 
@@ -119,3 +119,64 @@ def get_me(
 ):
 
     return current_user
+
+
+# ==========================================
+# ADMIN ONLY - RBAC TEST
+# ==========================================
+
+@router.get("/admin-only")
+def admin_only(
+    current_user: User = Depends(
+        require_roles("Admin")
+    )
+):
+
+    return {
+        "message": "Admin access granted",
+        "user": current_user.email,
+        "role": current_user.role.value
+    }
+
+
+# ==========================================
+# ADMIN + FLEET MANAGER - RBAC TEST
+# ==========================================
+
+@router.get("/management")
+def management_access(
+    current_user: User = Depends(
+        require_roles(
+            "Admin",
+            "FleetManager"
+        )
+    )
+):
+
+    return {
+        "message": "Management access granted",
+        "user": current_user.email,
+        "role": current_user.role.value
+    }
+
+
+# ==========================================
+# ADMIN + FLEET MANAGER + DISPATCHER
+# ==========================================
+
+@router.get("/dispatch")
+def dispatch_access(
+    current_user: User = Depends(
+        require_roles(
+            "Admin",
+            "FleetManager",
+            "Dispatcher"
+        )
+    )
+):
+
+    return {
+        "message": "Dispatch access granted",
+        "user": current_user.email,
+        "role": current_user.role.value
+    }

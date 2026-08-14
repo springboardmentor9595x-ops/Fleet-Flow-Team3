@@ -1,10 +1,14 @@
-from fastapi import APIRouter, Depends
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from typing import Optional
 
 from app.database import get_db
-from app.models.user import User
+from app.models.user import User, RoleEnum
 from app.schemas.user import UserOut
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_roles
 
 
 router = APIRouter(
@@ -14,7 +18,20 @@ router = APIRouter(
 
 
 # ============================================================
-# GET ALL USERS
+# SCHEMAS
+# ============================================================
+
+class UserProfileUpdate(BaseModel):
+    full_name: Optional[str] = None
+    phone: Optional[str] = None
+
+
+class UserRoleUpdate(BaseModel):
+    role: RoleEnum
+
+
+# ============================================================
+# GET ALL USERS — Admin only
 # ============================================================
 
 @router.get(
@@ -23,10 +40,133 @@ router = APIRouter(
 )
 def get_users(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_roles(RoleEnum.Admin)
+    ),
 ):
     return (
         db.query(User)
         .order_by(User.created_at.desc())
         .all()
     )
+
+
+# ============================================================
+# GET CURRENT USER PROFILE
+# ============================================================
+
+@router.get(
+    "/me",
+    response_model=UserOut,
+)
+def get_my_profile(
+    current_user: User = Depends(get_current_user),
+):
+    return current_user
+
+
+# ============================================================
+# UPDATE CURRENT USER PROFILE
+# ============================================================
+
+@router.put(
+    "/me",
+    response_model=UserOut,
+)
+def update_my_profile(
+    profile_data: UserProfileUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if profile_data.full_name is not None:
+        current_user.full_name = profile_data.full_name
+
+    if profile_data.phone is not None:
+        current_user.phone = profile_data.phone
+
+    db.commit()
+    db.refresh(current_user)
+
+    return current_user
+
+
+# ============================================================
+# GET USER BY ID — Admin only
+# ============================================================
+
+@router.get(
+    "/{user_id}",
+    response_model=UserOut,
+)
+def get_user(
+    user_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(
+        require_roles(RoleEnum.Admin)
+    ),
+):
+    user = db.query(User).filter(User.user_id == user_id).first()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return user
+
+
+# ============================================================
+# UPDATE USER ROLE — Admin only
+# ============================================================
+
+@router.put(
+    "/{user_id}/role",
+    response_model=UserOut,
+)
+def update_user_role(
+    user_id: UUID,
+    role_data: UserRoleUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(
+        require_roles(RoleEnum.Admin)
+    ),
+):
+    user = db.query(User).filter(User.user_id == user_id).first()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.role = role_data.role.value
+    db.commit()
+    db.refresh(user)
+
+    return user
+
+
+# ============================================================
+# DELETE USER — Admin only
+# ============================================================
+
+@router.delete(
+    "/{user_id}",
+)
+def delete_user(
+    user_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(
+        require_roles(RoleEnum.Admin)
+    ),
+):
+    if str(user_id) == str(current_user.user_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete your own account",
+        )
+
+    user = db.query(User).filter(User.user_id == user_id).first()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    db.delete(user)
+    db.commit()
+
+    return {"message": "User deleted successfully"}

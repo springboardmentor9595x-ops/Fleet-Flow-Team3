@@ -1,8 +1,10 @@
 from uuid import UUID
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from typing import Optional
 
 from app.database import get_db
 from app.models.notification import Notification
@@ -21,13 +23,19 @@ router = APIRouter(
 
 class NotificationCreate(BaseModel):
     user_id: UUID
+    title: Optional[str] = "System Alert"
     message: str
+    alert_type: Optional[str] = "INFO"
 
 
 class NotificationOut(BaseModel):
     notification_id: UUID
     user_id: UUID
+    title: Optional[str] = None
     message: str
+    alert_type: Optional[str] = "INFO"
+    is_read: Optional[bool] = False
+    created_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -45,7 +53,11 @@ def get_notifications(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return db.query(Notification).all()
+    return (
+        db.query(Notification)
+        .order_by(Notification.created_at.desc())
+        .all()
+    )
 
 
 # --------------------------------
@@ -64,7 +76,10 @@ def create_notification(
 ):
     notification = Notification(
         user_id=notification_data.user_id,
+        title=notification_data.title or "System Alert",
         message=notification_data.message,
+        alert_type=notification_data.alert_type or "INFO",
+        is_read=False,
     )
 
     db.add(notification)
@@ -100,6 +115,40 @@ def get_notification(
             status_code=404,
             detail="Notification not found",
         )
+
+    return notification
+
+
+# --------------------------------
+# MARK AS READ
+# --------------------------------
+
+@router.patch(
+    "/{notification_id}/read",
+    response_model=NotificationOut,
+)
+def mark_notification_read(
+    notification_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    notification = (
+        db.query(Notification)
+        .filter(
+            Notification.notification_id == notification_id
+        )
+        .first()
+    )
+
+    if not notification:
+        raise HTTPException(
+            status_code=404,
+            detail="Notification not found",
+        )
+
+    notification.is_read = True
+    db.commit()
+    db.refresh(notification)
 
     return notification
 

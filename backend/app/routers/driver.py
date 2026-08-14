@@ -7,6 +7,7 @@ from fastapi import (
 )
 
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.database import get_db
 
@@ -24,9 +25,9 @@ from app.crud.driver import (
     delete_driver,
 )
 
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_roles
 
-from app.models.user import User
+from app.models.user import User, RoleEnum
 
 
 # ============================================================
@@ -55,7 +56,10 @@ def create_driver_api(
     db: Session = Depends(get_db),
 
     current_user: User = Depends(
-        get_current_user
+        require_roles(
+            RoleEnum.Admin,
+            RoleEnum.FleetManager,
+        )
     ),
 ):
 
@@ -81,8 +85,19 @@ def get_drivers_api(
         get_current_user
     ),
 ):
-
-    drivers = get_drivers(db)
+    # Driver: show only their own profile
+    if current_user.role == RoleEnum.Driver or str(current_user.role) == "Driver":
+        from app.models.driver import Driver as DriverModel
+        driver = (
+            db.query(DriverModel)
+            .filter(DriverModel.user_id == current_user.user_id)
+            .first()
+        )
+        if not driver:
+            return []
+        drivers = [driver]
+    else:
+        drivers = get_drivers(db)
 
     result = []
 
@@ -254,6 +269,10 @@ def update_driver_api(
     ),
 ):
 
+    # --------------------------------------------------------
+    # Find driver
+    # --------------------------------------------------------
+
     driver = get_driver(
         db,
         driver_id,
@@ -266,13 +285,38 @@ def update_driver_api(
             detail="Driver not found",
         )
 
-    update_driver(
-        db=db,
-        driver=driver,
-        user_id=driver_in.user_id,
-    )
+    # --------------------------------------------------------
+    # Update driver safely
+    # --------------------------------------------------------
 
-    # Refresh relationships
+    try:
+
+        update_driver(
+            db=db,
+            driver=driver,
+            user_id=driver_in.user_id,
+        )
+
+    except ValueError as e:
+
+        raise HTTPException(
+            status_code=400,
+            detail=str(e),
+        )
+
+    except IntegrityError:
+
+        db.rollback()
+
+        raise HTTPException(
+            status_code=409,
+            detail="User is already assigned to another driver",
+        )
+
+    # --------------------------------------------------------
+    # Refresh driver
+    # --------------------------------------------------------
+
     driver = get_driver(
         db,
         driver_id,
@@ -285,6 +329,10 @@ def update_driver_api(
         if driver.vehicles
         else None
     )
+
+    # --------------------------------------------------------
+    # Response
+    # --------------------------------------------------------
 
     return {
 

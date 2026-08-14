@@ -4,7 +4,9 @@ import json
 import websockets
 
 
-VEHICLE_ID = "3006e2e3-4cea-4ae7-aa49-d9a1f4e9709f"
+import sys
+
+VEHICLE_ID = sys.argv[1] if len(sys.argv) > 1 else "72793178-ddc6-45d5-96ad-91457c1c31fb"
 
 WS_URL = f"ws://127.0.0.1:8000/ws/tracking/{VEHICLE_ID}"
 
@@ -34,44 +36,35 @@ async def main():
             print("Connected to FleetFlow WebSocket")
             print("Starting GPS simulation...\n")
 
-            for latitude, longitude, speed in GPS_POINTS:
+            while True:
+                for latitude, longitude, speed in GPS_POINTS:
 
-                gps_data = {
-                    "latitude": latitude,
-                    "longitude": longitude,
-                    "speed": speed,
-                    "recorded_time": "2026-08-11T18:00:00",
-                }
+                    gps_data = {
+                        "latitude": latitude,
+                        "longitude": longitude,
+                        "speed": speed,
+                        "recorded_time": "2026-08-11T18:00:00",
+                    }
 
-                # Send GPS data
-                await websocket.send(
-                    json.dumps(gps_data)
-                )
-
-                print("GPS sent:")
-                print(gps_data)
-
-                # Wait briefly for backend response
-                try:
-                    response = await asyncio.wait_for(
-                        websocket.recv(),
-                        timeout=3,
+                    # Send GPS data
+                    await websocket.send(
+                        json.dumps(gps_data)
                     )
 
-                    print("Response:")
-                    print(response)
+                    print("GPS sent:", speed, "km/h")
 
-                except asyncio.TimeoutError:
-                    print(
-                        "No response received, continuing..."
-                    )
+                    # Wait briefly for backend response
+                    try:
+                        response = await asyncio.wait_for(
+                            websocket.recv(),
+                            timeout=3,
+                        )
 
-                print("-" * 50)
+                    except asyncio.TimeoutError:
+                        pass
 
-                # Wait before next GPS point
-                await asyncio.sleep(2)
-
-            print("\nGPS simulation completed.")
+                    # Wait before next GPS point
+                    await asyncio.sleep(2)
 
     except websockets.exceptions.ConnectionClosed as error:
         print(

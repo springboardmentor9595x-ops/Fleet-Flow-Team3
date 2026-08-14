@@ -7,7 +7,6 @@ from sqlalchemy import (
     Float,
     ForeignKey,
 )
-
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -19,7 +18,6 @@ from app.database import Base
 # ============================================================
 
 class Vehicle(Base):
-
     __tablename__ = "vehicles"
 
     # ========================================================
@@ -103,8 +101,12 @@ class Vehicle(Base):
 
     driver_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("drivers.driver_id"),
+        ForeignKey(
+            "drivers.driver_id",
+            ondelete="SET NULL",
+        ),
         nullable=True,
+        index=True,
     )
 
     # ========================================================

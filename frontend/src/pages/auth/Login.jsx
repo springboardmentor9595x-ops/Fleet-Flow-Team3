@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
+
 
 export default function Login() {
   const { login } = useAuth();
@@ -68,10 +69,18 @@ export default function Login() {
             {loading ? "Logging in..." : "Login"}
           </button>
         </form>
+
+        <p style={{ textAlign: "center", marginTop: "20px", fontSize: "14px", color: "#666" }}>
+          Don't have an account?{" "}
+          <Link to="/signup" style={{ color: "#2563eb", fontWeight: "600", textDecoration: "none" }}>
+            Sign up
+          </Link>
+        </p>
       </div>
     </div>
   );
 }
+
 
 const styles = {
   container: {

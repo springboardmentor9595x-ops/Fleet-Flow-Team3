@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import api from "../../api/axios";
 
 import {
   MapContainer,
@@ -78,6 +79,19 @@ export default function LiveTracking() {
     useState("Connecting...");
 
   const [error, setError] = useState("");
+  const [vehicle, setVehicle] = useState(null);
+
+  useEffect(() => {
+    if (vehicleId) {
+      api.get(`/vehicles/${vehicleId}`)
+        .then((res) => {
+          setVehicle(res.data);
+        })
+        .catch((err) => {
+          console.error("Failed to fetch vehicle:", err);
+        });
+    }
+  }, [vehicleId]);
 
   // ==========================================================
   // WEBSOCKET
@@ -450,11 +464,11 @@ export default function LiveTracking() {
         <div>
 
           <div style={styles.cardLabel}>
-            VEHICLE ID
+            REGISTRATION NUMBER
           </div>
 
           <div style={styles.vehicleId}>
-            {vehicleId || "Not selected"}
+            {vehicle?.registration_number || vehicleId || "Not selected"}
           </div>
 
         </div>
@@ -637,9 +651,9 @@ export default function LiveTracking() {
 
                   <p>
                     <strong>
-                      Vehicle ID:
+                      Registration:
                     </strong>{" "}
-                    {gpsData.vehicle_id}
+                    {vehicle?.registration_number || gpsData.vehicle_id}
                   </p>
 
                   <p>
@@ -723,8 +737,8 @@ export default function LiveTracking() {
           <div style={styles.detailsGrid}>
 
             <Detail
-              label="Vehicle ID"
-              value={gpsData.vehicle_id}
+              label="Registration"
+              value={vehicle?.registration_number || gpsData.vehicle_id}
             />
 
             <Detail

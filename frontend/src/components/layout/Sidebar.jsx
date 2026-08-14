@@ -10,12 +10,14 @@ import {
   Bell,
   ClipboardCheck,
   LogOut,
+  UserCog,
+  UserCircle,
 } from "lucide-react";
 
 import { useAuth } from "../../context/AuthContext";
 
 export default function Sidebar() {
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const navigate = useNavigate();
 
   const handleLogout = () => {
@@ -71,6 +73,15 @@ export default function Sidebar() {
     },
   ];
 
+  // Admin-only items
+  if (user?.role === "Admin") {
+    menuItems.push({
+      name: "User Management",
+      path: "/users",
+      icon: UserCog,
+    });
+  }
+
   return (
     <aside style={styles.sidebar}>
       <div style={styles.logo}>
@@ -98,10 +109,27 @@ export default function Sidebar() {
         })}
       </nav>
 
-      <button onClick={handleLogout} style={styles.logout}>
-        <LogOut size={20} />
-        <span>Logout</span>
-      </button>
+      <div style={styles.footer}>
+        {/* Profile link */}
+        <NavLink
+          to="/profile"
+          style={({ isActive }) => ({
+            ...styles.profileLink,
+            ...(isActive ? styles.activeLink : {}),
+          })}
+        >
+          <UserCircle size={20} />
+          <span>
+            {user?.full_name || "Profile"}
+          </span>
+        </NavLink>
+
+        {/* Logout */}
+        <button onClick={handleLogout} style={styles.logout}>
+          <LogOut size={20} />
+          <span>Logout</span>
+        </button>
+      </div>
     </aside>
   );
 }
@@ -129,6 +157,7 @@ const styles = {
     fontSize: "24px",
     fontWeight: "700",
     borderBottom: "1px solid rgba(255,255,255,0.1)",
+    flexShrink: 0,
   },
 
   nav: {
@@ -136,6 +165,8 @@ const styles = {
     display: "flex",
     flexDirection: "column",
     gap: "5px",
+    flex: 1,
+    overflowY: "auto",
   },
 
   link: {
@@ -155,8 +186,30 @@ const styles = {
     color: "white",
   },
 
+  footer: {
+    padding: "12px",
+    borderTop: "1px solid rgba(255,255,255,0.1)",
+    display: "flex",
+    flexDirection: "column",
+    gap: "5px",
+  },
+
+  profileLink: {
+    display: "flex",
+    alignItems: "center",
+    gap: "13px",
+    padding: "11px 15px",
+    borderRadius: "8px",
+    color: "#94a3b8",
+    textDecoration: "none",
+    fontSize: "14px",
+    transition: "0.2s",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+
   logout: {
-    margin: "auto 12px 25px",
     padding: "12px 15px",
     display: "flex",
     alignItems: "center",

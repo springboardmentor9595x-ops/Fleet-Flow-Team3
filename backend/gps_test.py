@@ -10,12 +10,16 @@ URL = (
     f"/ws/tracking/{VEHICLE_ID}"
 )
 
+# Destination used by FleetFlow
+DESTINATION_LAT = 28.4744
+DESTINATION_LON = 77.5040
+
 
 async def main():
 
-    # Starting location
-    latitude = 28.4744
-    longitude = 77.5040
+    # Start vehicle AWAY from destination
+    latitude = 28.4831
+    longitude = 77.5127
 
     speed = 30
 
@@ -51,11 +55,22 @@ async def main():
                 f"Status: {data['status']}"
             )
 
-            # Simulate vehicle movement
-            latitude += 0.00005
-            longitude += 0.00005
+            # Move vehicle TOWARD destination
+            latitude -= 0.00010
+            longitude -= 0.00010
 
-            # Send next GPS position after 2 seconds
+            # Stop when destination is reached
+            if (
+                latitude <= DESTINATION_LAT
+                and longitude <= DESTINATION_LON
+            ):
+                latitude = DESTINATION_LAT
+                longitude = DESTINATION_LON
+
+                print("====================================")
+                print("🚚 Vehicle reached destination")
+                print("====================================")
+
             await asyncio.sleep(2)
 
 

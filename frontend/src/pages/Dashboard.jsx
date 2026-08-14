@@ -11,6 +11,7 @@ export default function Dashboard() {
   const [shipments, setShipments] = useState([]);
   const [trips, setTrips] = useState([]);
   const [maintenance, setMaintenance] = useState([]);
+  const [maintenanceAlerts, setMaintenanceAlerts] = useState(null);
   const [fuel, setFuel] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [attendance, setAttendance] = useState([]);
@@ -95,6 +96,11 @@ export default function Dashboard() {
     };
 
     loadDashboard();
+
+    // Load maintenance alerts separately (non-blocking)
+    api.get("/maintenance/alerts")
+      .then((res) => setMaintenanceAlerts(res.data))
+      .catch(() => {});
   }, []);
 
   return (
@@ -117,6 +123,35 @@ export default function Dashboard() {
             <div style={styles.error}>
               {error}
             </div>
+          )}
+
+          {/* Maintenance Alerts Banner */}
+          {maintenanceAlerts && maintenanceAlerts.total_alerts > 0 && (
+            <a
+              href="/maintenance"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "12px",
+                padding: "14px 20px",
+                background: "#fff7ed",
+                border: "1px solid #fed7aa",
+                borderRadius: "10px",
+                marginBottom: "20px",
+                color: "#c2410c",
+                fontWeight: "600",
+                textDecoration: "none",
+                fontSize: "14px",
+              }}
+            >
+              <span style={{ fontSize: "20px" }}>⚠️</span>
+              <span>
+                {maintenanceAlerts.total_alerts} vehicle maintenance alert{maintenanceAlerts.total_alerts > 1 ? "s" : ""}:{" "}
+                {maintenanceAlerts.alerts.filter(a => a.alert_level === "overdue").length} overdue,{" "}
+                {maintenanceAlerts.alerts.filter(a => a.alert_level === "upcoming").length} upcoming within 7 days.
+                <strong style={{ marginLeft: "8px" }}>→ View Maintenance</strong>
+              </span>
+            </a>
           )}
 
           {/* Dashboard Cards */}

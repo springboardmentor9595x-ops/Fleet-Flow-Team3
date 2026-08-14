@@ -16,7 +16,6 @@ export default function Trips() {
   const [vehicles, setVehicles] = useState([]);
   const [drivers, setDrivers] = useState([]);
   const [shipments, setShipments] = useState([]);
-  const [users, setUsers] = useState([]);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -34,10 +33,11 @@ export default function Trips() {
     start_time: "",
     end_time: "",
     distance: "",
+    route_type: "Fastest",
   });
 
   // =========================================================
-  // LOAD ALL TRIP DATA
+  // LOAD TRIPS, VEHICLES, DRIVERS AND SHIPMENTS
   // =========================================================
 
   const loadData = async () => {
@@ -49,20 +49,17 @@ export default function Trips() {
         vehiclesResponse,
         driversResponse,
         shipmentsResponse,
-        usersResponse,
       ] = await Promise.all([
         api.get("/trips/"),
         api.get("/vehicles/"),
         api.get("/drivers/"),
         api.get("/shipments/"),
-        api.get("/users/"),
       ]);
 
       console.log("Trips:", tripsResponse.data);
       console.log("Vehicles:", vehiclesResponse.data);
       console.log("Drivers:", driversResponse.data);
       console.log("Shipments:", shipmentsResponse.data);
-      console.log("Users:", usersResponse.data);
 
       setTrips(
         Array.isArray(tripsResponse.data)
@@ -87,12 +84,6 @@ export default function Trips() {
           ? shipmentsResponse.data
           : []
       );
-
-      setUsers(
-        Array.isArray(usersResponse.data)
-          ? usersResponse.data
-          : []
-      );
     } catch (error) {
       console.error("Failed to load trip data:", error);
 
@@ -100,6 +91,11 @@ export default function Trips() {
         error.response?.data?.detail ||
           "Unable to load trip data."
       );
+
+      setTrips([]);
+      setVehicles([]);
+      setDrivers([]);
+      setShipments([]);
     } finally {
       setLoading(false);
     }
@@ -123,6 +119,7 @@ export default function Trips() {
       start_time: "",
       end_time: "",
       distance: "",
+      route_type: "Fastest",
     });
   };
 
@@ -147,14 +144,23 @@ export default function Trips() {
       vehicle_id: trip.vehicle_id || "",
       driver_id: trip.driver_id || "",
       shipment_id: trip.shipment_id || "",
-      start_location: trip.start_location || "",
-      destination: trip.destination || "",
-      start_time: formatDateTimeForInput(
-        trip.start_time
-      ),
-      end_time: formatDateTimeForInput(
-        trip.end_time
-      ),
+
+      start_location:
+        trip.start_location || "",
+
+      destination:
+        trip.destination || "",
+
+      start_time:
+        formatDateTimeForInput(
+          trip.start_time
+        ),
+
+      end_time:
+        formatDateTimeForInput(
+          trip.end_time
+        ),
+
       distance:
         trip.distance !== null &&
         trip.distance !== undefined
@@ -180,7 +186,7 @@ export default function Trips() {
   };
 
   // =========================================================
-  // DATE FORMATTER
+  // FORMAT DATE/TIME
   // =========================================================
 
   const formatDateTimeForInput = (value) => {
@@ -220,7 +226,7 @@ export default function Trips() {
   };
 
   // =========================================================
-  // GET VEHICLE DISPLAY NAME
+  // VEHICLE NAME
   // =========================================================
 
   const getVehicleName = (vehicleId) => {
@@ -243,39 +249,12 @@ export default function Trips() {
       vehicle.license_plate ||
       vehicle.vehicle_number ||
       vehicle.vehicle_name ||
-      vehicle.vehicle_id
+      String(vehicle.vehicle_id)
     );
   };
 
   // =========================================================
-  // GET USER DISPLAY NAME
-  // =========================================================
-
-  const getUserName = (userId) => {
-    if (!userId) {
-      return null;
-    }
-
-    const user = users.find(
-      (item) =>
-        String(item.user_id) ===
-        String(userId)
-    );
-
-    if (!user) {
-      return null;
-    }
-
-    return (
-      user.full_name ||
-      user.name ||
-      user.email ||
-      null
-    );
-  };
-
-  // =========================================================
-  // GET DRIVER DISPLAY NAME
+  // DRIVER NAME
   // =========================================================
 
   const getDriverName = (driverId) => {
@@ -293,7 +272,6 @@ export default function Trips() {
       return String(driverId);
     }
 
-    // If Driver API already returns nested user
     if (
       driver.user &&
       driver.user.full_name
@@ -301,33 +279,27 @@ export default function Trips() {
       return driver.user.full_name;
     }
 
-    // If driver directly contains full_name
+    if (driver.user?.name) {
+      return driver.user.name;
+    }
+
     if (driver.full_name) {
       return driver.full_name;
     }
 
-    // If driver directly contains name
     if (driver.name) {
       return driver.name;
     }
 
-    // If driver has user_id, find user
-    if (driver.user_id) {
-      const userName = getUserName(
-        driver.user_id
-      );
-
-      if (userName) {
-        return userName;
-      }
+    if (driver.driver_name) {
+      return driver.driver_name;
     }
 
-    // Final fallback
-    return driver.driver_id;
+    return String(driver.driver_id);
   };
 
   // =========================================================
-  // GET SHIPMENT DISPLAY NAME
+  // SHIPMENT NAME
   // =========================================================
 
   const getShipmentName = (shipmentId) => {
@@ -347,12 +319,12 @@ export default function Trips() {
 
     return (
       shipment.tracking_number ||
-      shipment.shipment_id
+      String(shipment.shipment_id)
     );
   };
 
   // =========================================================
-  // AUTO-FILL LOCATION FROM SHIPMENT
+  // SHIPMENT CHANGE
   // =========================================================
 
   const handleShipmentChange = (event) => {
@@ -366,16 +338,17 @@ export default function Trips() {
 
     setForm((previous) => ({
       ...previous,
+
       shipment_id: shipmentId,
 
       start_location:
-        previous.start_location ||
         shipment?.source ||
+        previous.start_location ||
         "",
 
       destination:
-        previous.destination ||
         shipment?.destination ||
+        previous.destination ||
         "",
     }));
   };
@@ -425,6 +398,14 @@ export default function Trips() {
       return;
     }
 
+    if (
+      form.distance !== "" &&
+      Number(form.distance) < 0
+    ) {
+      alert("Distance cannot be negative.");
+      return;
+    }
+
     setSaving(true);
 
     try {
@@ -470,6 +451,12 @@ export default function Trips() {
         );
       }
 
+      alert(
+        editingTrip
+          ? "Trip updated successfully."
+          : "Trip created successfully."
+      );
+
       setShowForm(false);
       setEditingTrip(null);
       resetForm();
@@ -481,6 +468,11 @@ export default function Trips() {
         error
       );
 
+      console.error(
+        "Backend response:",
+        error.response?.data
+      );
+
       const detail =
         error.response?.data?.detail;
 
@@ -489,7 +481,8 @@ export default function Trips() {
           detail
             .map(
               (item) =>
-                item.msg || String(item)
+                item.msg ||
+                String(item)
             )
             .join("\n")
         );
@@ -522,6 +515,10 @@ export default function Trips() {
         `/trips/${tripId}`
       );
 
+      alert(
+        "Trip deleted successfully."
+      );
+
       await loadData();
     } catch (error) {
       console.error(
@@ -537,13 +534,49 @@ export default function Trips() {
   };
 
   // =========================================================
+  // START TRIP
+  // =========================================================
+
+  const handleStartTrip = async (tripId) => {
+    if (!window.confirm("Start this trip? Vehicle and driver will be marked In Transit.")) return;
+    try {
+      await api.post(`/trips/${tripId}/start`);
+      await loadData();
+    } catch (error) {
+      alert(error.response?.data?.detail || "Failed to start trip.");
+    }
+  };
+
+  // =========================================================
+  // END TRIP
+  // =========================================================
+
+  const handleEndTrip = async (tripId) => {
+    if (!window.confirm("End this trip? Shipment will be marked Delivered and vehicle freed.")) return;
+    try {
+      await api.post(`/trips/${tripId}/end`);
+      await loadData();
+    } catch (error) {
+      alert(error.response?.data?.detail || "Failed to end trip.");
+    }
+  };
+
+  // =========================================================
   // SEARCH
   // =========================================================
 
   const filteredTrips = trips.filter(
     (trip) => {
       const query =
-        search.toLowerCase();
+        search.trim().toLowerCase();
+
+      if (!query) {
+        return true;
+      }
+
+      const tripId = String(
+        trip.trip_id || ""
+      ).toLowerCase();
 
       const vehicleName =
         getVehicleName(
@@ -560,36 +593,29 @@ export default function Trips() {
           trip.shipment_id
         ).toLowerCase();
 
-      return (
-        String(
-          trip.trip_id || ""
-        )
-          .toLowerCase()
-          .includes(query) ||
-
-        vehicleName.includes(query) ||
-
-        driverName.includes(query) ||
-
-        shipmentName.includes(query) ||
-
+      const startLocation =
         String(
           trip.start_location || ""
-        )
-          .toLowerCase()
-          .includes(query) ||
+        ).toLowerCase();
 
+      const destination =
         String(
           trip.destination || ""
-        )
-          .toLowerCase()
-          .includes(query) ||
+        ).toLowerCase();
 
+      const status =
         String(
           trip.status || ""
-        )
-          .toLowerCase()
-          .includes(query)
+        ).toLowerCase();
+
+      return (
+        tripId.includes(query) ||
+        vehicleName.includes(query) ||
+        driverName.includes(query) ||
+        shipmentName.includes(query) ||
+        startLocation.includes(query) ||
+        destination.includes(query) ||
+        status.includes(query)
       );
     }
   );
@@ -603,7 +629,10 @@ export default function Trips() {
       <Sidebar />
 
       <div style={styles.content}>
-        {/* HEADER */}
+
+        {/* =================================================
+            HEADER
+        ================================================= */}
 
         <header style={styles.header}>
           <div>
@@ -616,34 +645,52 @@ export default function Trips() {
             </p>
           </div>
 
-          <div style={styles.headerActions}>
+          <div
+            style={
+              styles.headerActions
+            }
+          >
             <button
-              style={styles.refreshButton}
+              style={
+                styles.refreshButton
+              }
               onClick={loadData}
               disabled={loading}
               title="Refresh"
             >
-              <RefreshCw size={18} />
+              <RefreshCw
+                size={18}
+              />
+
               Refresh
             </button>
 
             <button
               style={styles.addButton}
               onClick={openAddForm}
+              disabled={loading}
             >
               <Plus size={18} />
+
               Add Trip
             </button>
           </div>
         </header>
 
-        {/* MAIN */}
+        {/* =================================================
+            MAIN
+        ================================================= */}
 
         <main style={styles.main}>
+
           {/* TOOLBAR */}
 
-          <div style={styles.toolbar}>
-            <div style={styles.searchBox}>
+          <div
+            style={styles.toolbar}
+          >
+            <div
+              style={styles.searchBox}
+            >
               <Search
                 size={19}
                 color="#64748b"
@@ -658,41 +705,67 @@ export default function Trips() {
                     event.target.value
                   )
                 }
-                style={styles.searchInput}
+                style={
+                  styles.searchInput
+                }
               />
             </div>
 
-            <div style={styles.count}>
-              {filteredTrips.length} trip
-              {filteredTrips.length !== 1
+            <div
+              style={styles.count}
+            >
+              {filteredTrips.length}{" "}
+              trip
+              {filteredTrips.length !==
+              1
                 ? "s"
                 : ""}
             </div>
           </div>
 
-          {/* TABLE */}
+          {/* =================================================
+              TABLE
+          ================================================= */}
 
-          <section style={styles.tableCard}>
+          <section
+            style={
+              styles.tableCard
+            }
+          >
             {loading ? (
-              <div style={styles.message}>
+              <div
+                style={
+                  styles.message
+                }
+              >
                 Loading trips...
               </div>
-            ) : filteredTrips.length === 0 ? (
-              <div style={styles.empty}>
+            ) : filteredTrips.length ===
+              0 ? (
+              <div
+                style={
+                  styles.empty
+                }
+              >
                 <h3>
                   No trips found
                 </h3>
 
                 <p>
-                  Create your first trip
-                  to get started.
+                  Create your first
+                  trip to get started.
                 </p>
 
                 <button
-                  style={styles.addButton}
-                  onClick={openAddForm}
+                  style={
+                    styles.addButton
+                  }
+                  onClick={
+                    openAddForm
+                  }
                 >
                   <Plus size={18} />
+
                   Add Trip
                 </button>
               </div>
@@ -703,7 +776,9 @@ export default function Trips() {
                 }
               >
                 <table
-                  style={styles.table}
+                  style={
+                    styles.table
+                  }
                 >
                   <thead>
                     <tr>
@@ -762,7 +837,13 @@ export default function Trips() {
                                 "Unknown"}
                             </strong>
 
-                            {" → "}
+                            <span
+                              style={
+                                styles.routeArrow
+                              }
+                            >
+                              →
+                            </span>
 
                             <strong>
                               {trip.destination ||
@@ -830,11 +911,32 @@ export default function Trips() {
                                   size={17}
                                 />
                               </button>
+
+                              {trip.status === "Scheduled" && (
+                                <button
+                                  style={styles.startButton}
+                                  onClick={() => handleStartTrip(trip.trip_id)}
+                                  title="Start trip"
+                                >
+                                  ▶ Start
+                                </button>
+                              )}
+
+                              {trip.status === "In Transit" && (
+                                <button
+                                  style={styles.endButton}
+                                  onClick={() => handleEndTrip(trip.trip_id)}
+                                  title="End trip"
+                                >
+                                  ✓ End
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>
                       )
                     )}
+
                   </tbody>
                 </table>
               </div>
@@ -842,11 +944,22 @@ export default function Trips() {
           </section>
         </main>
 
-        {/* ADD / EDIT MODAL */}
+        {/* =================================================
+            ADD / EDIT MODAL
+        ================================================= */}
 
         {showForm && (
-          <div style={styles.overlay}>
-            <div style={styles.modal}>
+          <div
+            style={
+              styles.overlay
+            }
+          >
+            <div
+              style={
+                styles.modal
+              }
+            >
+
               {/* MODAL HEADER */}
 
               <div
@@ -877,19 +990,27 @@ export default function Trips() {
                 </div>
 
                 <button
+                  type="button"
                   style={
                     styles.closeButton
                   }
-                  onClick={closeForm}
+                  onClick={
+                    closeForm
+                  }
                   disabled={saving}
                 >
                   <X size={22} />
                 </button>
               </div>
 
+              {/* FORM */}
+
               <form
-                onSubmit={handleSubmit}
+                onSubmit={
+                  handleSubmit
+                }
               >
+
                 {/* VEHICLE */}
 
                 <label
@@ -1210,23 +1331,35 @@ export default function Trips() {
 function getStatusStyle(status) {
   const value = String(
     status || "Scheduled"
-  ).toLowerCase();
+  )
+    .trim()
+    .toLowerCase();
 
-  if (value === "completed") {
+  if (
+    value === "completed" ||
+    value === "complete"
+  ) {
     return {
       background: "#dcfce7",
       color: "#166534",
     };
   }
 
-  if (value === "in progress") {
+  if (
+    value === "in progress" ||
+    value === "in_progress" ||
+    value === "in-progress"
+  ) {
     return {
       background: "#dbeafe",
       color: "#1d4ed8",
     };
   }
 
-  if (value === "cancelled") {
+  if (
+    value === "cancelled" ||
+    value === "canceled"
+  ) {
     return {
       background: "#fee2e2",
       color: "#b91c1c",
@@ -1381,6 +1514,12 @@ const styles = {
     color: "#64748b",
   },
 
+  routeArrow: {
+    margin:
+      "0 7px",
+    color: "#64748b",
+  },
+
   actions: {
     display: "flex",
     gap: "7px",
@@ -1420,6 +1559,7 @@ const styles = {
     borderRadius: "20px",
     fontSize: "12px",
     fontWeight: "600",
+    whiteSpace: "nowrap",
   },
 
   overlay: {
@@ -1472,7 +1612,8 @@ const styles = {
 
   closeButton: {
     border: "none",
-    background: "transparent",
+    background:
+      "transparent",
     cursor: "pointer",
     color: "#64748b",
   },
@@ -1488,7 +1629,8 @@ const styles = {
 
   input: {
     width: "100%",
-    boxSizing: "border-box",
+    boxSizing:
+      "border-box",
     padding: "11px",
     border:
       "1px solid #cbd5e1",
@@ -1517,7 +1659,8 @@ const styles = {
   },
 
   cancelButton: {
-    padding: "11px 18px",
+    padding:
+      "11px 18px",
     border:
       "1px solid #cbd5e1",
     borderRadius: "7px",
@@ -1527,7 +1670,8 @@ const styles = {
   },
 
   saveButton: {
-    padding: "11px 20px",
+    padding:
+      "11px 20px",
     border: "none",
     borderRadius: "7px",
     background: "#2563eb",
@@ -1535,4 +1679,26 @@ const styles = {
     fontWeight: "600",
     cursor: "pointer",
   },
-};
+
+  startButton: {
+    padding: "6px 12px",
+    border: "none",
+    borderRadius: "6px",
+    background: "#16a34a",
+    color: "white",
+    fontSize: "12px",
+    fontWeight: "600",
+    cursor: "pointer",
+  },
+
+  endButton: {
+    padding: "6px 12px",
+    border: "none",
+    borderRadius: "6px",
+    background: "#ea580c",
+    color: "white",
+    fontSize: "12px",
+    fontWeight: "600",
+    cursor: "pointer",
+  },
+};

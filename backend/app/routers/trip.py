@@ -2,6 +2,7 @@ from uuid import UUID
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from app.models.shipment import ShipmentStatus
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -10,7 +11,8 @@ from app.models.trip import Trip
 from app.models.vehicle import Vehicle
 from app.models.driver import Driver
 from app.models.shipment import Shipment
-from app.core.deps import get_current_user
+from app.models.user import RoleEnum
+from app.core.deps import get_current_user, require_roles
 
 
 router = APIRouter(
@@ -36,6 +38,8 @@ class TripCreate(BaseModel):
 
     distance: float | None = None
 
+    route_type: str | None = "Fastest"
+
 
 class TripUpdate(BaseModel):
     vehicle_id: UUID | None = None
@@ -50,6 +54,7 @@ class TripUpdate(BaseModel):
 
     distance: float | None = None
     status: str | None = None
+    route_type: str | None = None
 
 
 class TripOut(BaseModel):
@@ -67,9 +72,11 @@ class TripOut(BaseModel):
 
     distance: float | None
     status: str | None
+    route_type: str | None
 
     class Config:
         from_attributes = True
+
 
 
 # =========================================================
@@ -85,9 +92,27 @@ def get_trips(
     current_user=Depends(get_current_user),
 ):
     """
-    Return all trips that have valid vehicle,
-    driver and shipment references.
+    Admin/FM/Dispatcher: all trips.
+    Driver: only trips assigned to their driver profile.
     """
+    is_driver = (
+        current_user.role == RoleEnum.Driver
+        or str(current_user.role) == "Driver"
+    )
+
+    if is_driver:
+        driver_profile = (
+            db.query(Driver)
+            .filter(Driver.user_id == current_user.user_id)
+            .first()
+        )
+        if not driver_profile:
+            return []
+        return (
+            db.query(Trip)
+            .filter(Trip.driver_id == driver_profile.driver_id)
+            .all()
+        )
 
     return (
         db.query(Trip)
@@ -112,7 +137,13 @@ def get_trips(
 def create_trip(
     trip_data: TripCreate,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(
+        require_roles(
+            RoleEnum.Admin,
+            RoleEnum.FleetManager,
+            RoleEnum.Dispatcher,
+        )
+    ),
 ):
     # -----------------------------------------------------
     # Check vehicle
@@ -185,6 +216,8 @@ def create_trip(
         end_time=trip_data.end_time,
 
         distance=trip_data.distance,
+
+        route_type=trip_data.route_type or "Fastest",
 
         status="Scheduled",
     )
@@ -392,3 +425,167 @@ def delete_trip(
     return {
         "message": "Trip deleted successfully"
     }
+
+
+# =========================================================
+# START TRIP
+# Sets status → In Transit, locks vehicle and driver
+# =========================================================
+
+@router.post(
+    "/{trip_id}/start",
+    response_model=TripOut,
+)
+def start_trip(
+    trip_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    trip = (
+        db.query(Trip)
+        .filter(Trip.trip_id == trip_id)
+        .first()
+    )
+
+    if not trip:
+        raise HTTPException(
+            status_code=404,
+            detail="Trip not found",
+        )
+
+    # Driver can only start their own trip
+    if current_user.role == RoleEnum.Driver or str(current_user.role) == "Driver":
+        driver_profile = (
+            db.query(Driver)
+            .filter(Driver.user_id == current_user.user_id)
+            .first()
+        )
+        if not driver_profile or str(trip.driver_id) != str(driver_profile.driver_id):
+            raise HTTPException(
+                status_code=403,
+                detail="You can only start your own trips",
+            )
+
+    if trip.status not in ["Scheduled"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot start a trip with status '{trip.status}'",
+        )
+
+    # Mark trip as In Transit
+    trip.status = "In Transit"
+    trip.start_time = datetime.utcnow()
+
+    # Lock vehicle
+    vehicle = (
+        db.query(Vehicle)
+        .filter(Vehicle.vehicle_id == trip.vehicle_id)
+        .first()
+    )
+    if vehicle:
+        vehicle.status = "In Transit"
+
+    # Lock driver
+    driver = (
+        db.query(Driver)
+        .filter(Driver.driver_id == trip.driver_id)
+        .first()
+    )
+    if driver:
+        driver.status = "On Trip"
+
+    # Update shipment to In Transit
+    shipment = (
+        db.query(Shipment)
+        .filter(Shipment.shipment_id == trip.shipment_id)
+        .first()
+    )
+    if shipment:
+        shipment.status = ShipmentStatus.In_Transit
+
+    db.commit()
+    db.refresh(trip)
+
+    return trip
+
+
+# =========================================================
+# END TRIP
+# Records end time, marks shipment Delivered, frees vehicle/driver
+# =========================================================
+
+@router.post(
+    "/{trip_id}/end",
+    response_model=TripOut,
+)
+def end_trip(
+    trip_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    trip = (
+        db.query(Trip)
+        .filter(Trip.trip_id == trip_id)
+        .first()
+    )
+
+    if not trip:
+        raise HTTPException(
+            status_code=404,
+            detail="Trip not found",
+        )
+
+    # Driver can only end their own trip
+    if current_user.role == RoleEnum.Driver or str(current_user.role) == "Driver":
+        driver_profile = (
+            db.query(Driver)
+            .filter(Driver.user_id == current_user.user_id)
+            .first()
+        )
+        if not driver_profile or str(trip.driver_id) != str(driver_profile.driver_id):
+            raise HTTPException(
+                status_code=403,
+                detail="You can only end your own trips",
+            )
+
+    if trip.status not in ["In Transit"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot end a trip with status '{trip.status}'",
+        )
+
+    # Mark trip Completed
+    trip.status = "Completed"
+    trip.end_time = datetime.utcnow()
+
+    # Free vehicle
+    vehicle = (
+        db.query(Vehicle)
+        .filter(Vehicle.vehicle_id == trip.vehicle_id)
+        .first()
+    )
+    if vehicle:
+        vehicle.status = "Available"
+
+    # Free driver
+    driver = (
+        db.query(Driver)
+        .filter(Driver.driver_id == trip.driver_id)
+        .first()
+    )
+    if driver:
+        driver.status = "Available"
+
+    # Mark shipment Delivered
+    shipment = (
+        db.query(Shipment)
+        .filter(Shipment.shipment_id == trip.shipment_id)
+        .first()
+    )
+    if shipment:
+        shipment.status = ShipmentStatus.Delivered
+
+    db.commit()
+    db.refresh(trip)
+
+    return trip

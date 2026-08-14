@@ -1,6 +1,7 @@
 import uuid
+from datetime import datetime
 
-from sqlalchemy import Column, ForeignKey, Text, DateTime, Float, String
+from sqlalchemy import Column, DateTime, Float, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID
 
 from app.database import Base
@@ -33,8 +34,8 @@ class Trip(Base):
         nullable=False
     )
 
-    start_location = Column(Text, nullable=True)
-    destination = Column(Text, nullable=True)
+    start_location = Column(String(255), nullable=False)
+    destination = Column(String(255), nullable=False)
 
     start_time = Column(DateTime, nullable=True)
     end_time = Column(DateTime, nullable=True)
@@ -43,6 +44,12 @@ class Trip(Base):
 
     status = Column(
         String(50),
-        nullable=True,
+        nullable=False,
         default="Scheduled"
+    )
+
+    route_type = Column(
+        String(50),
+        nullable=True,
+        default="Fastest"
     )

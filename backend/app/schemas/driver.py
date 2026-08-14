@@ -1,28 +1,26 @@
-from pydantic import BaseModel
+from typing import Optional
 from uuid import UUID
+
+from pydantic import BaseModel
 
 
 class DriverCreate(BaseModel):
-    user_id: UUID | None = None
+    user_id: Optional[UUID] = None
 
 
 class DriverUpdate(BaseModel):
-    user_id: UUID | None = None
+    user_id: Optional[UUID] = None
 
 
 class DriverOut(BaseModel):
     driver_id: UUID
-    user_id: UUID | None = None
-
-    # User information
-    full_name: str | None = None
-    email: str | None = None
-    phone: str | None = None
+    user_id: Optional[UUID] = None
 
     # Vehicle information
-    vehicle_id: UUID | None = None
-    registration_number: str | None = None
-    vehicle_status: str | None = None
+    vehicle_ids: list[UUID] = []
+    registration_numbers: list[str] = []
+    vehicle_statuses: list[str] = []
 
-    class Config:
-        from_attributes = True
+    model_config = {
+        "from_attributes": True
+    }

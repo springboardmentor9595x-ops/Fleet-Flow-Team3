@@ -7,7 +7,12 @@ from sqlalchemy.dialects.postgresql import UUID
 from app.database import Base
 
 
+# ============================================================
+# SHIPMENT STATUS
+# ============================================================
+
 class ShipmentStatus(str, enum.Enum):
+
     Created = "Created"
     Assigned = "Assigned"
     In_Transit = "In Transit"
@@ -16,8 +21,17 @@ class ShipmentStatus(str, enum.Enum):
     Cancelled = "Cancelled"
 
 
+# ============================================================
+# SHIPMENT MODEL
+# ============================================================
+
 class Shipment(Base):
+
     __tablename__ = "shipments"
+
+    # --------------------------------------------------------
+    # Shipment ID
+    # --------------------------------------------------------
 
     shipment_id = Column(
         UUID(as_uuid=True),
@@ -25,31 +39,55 @@ class Shipment(Base):
         default=uuid.uuid4
     )
 
+    # --------------------------------------------------------
+    # Tracking Number
+    # --------------------------------------------------------
+
     tracking_number = Column(
         String(100),
         unique=True,
         nullable=False
     )
 
+    # --------------------------------------------------------
+    # Source
+    # --------------------------------------------------------
+
     source = Column(
         String(255),
         nullable=False
     )
+
+    # --------------------------------------------------------
+    # Destination
+    # --------------------------------------------------------
 
     destination = Column(
         String(255),
         nullable=False
     )
 
+    # --------------------------------------------------------
+    # Customer
+    # --------------------------------------------------------
+
     customer_name = Column(
         String(150),
         nullable=False
     )
 
+    # --------------------------------------------------------
+    # Weight
+    # --------------------------------------------------------
+
     shipment_weight = Column(
         Float,
         nullable=False
     )
+
+    # --------------------------------------------------------
+    # Vehicle
+    # --------------------------------------------------------
 
     vehicle_id = Column(
         UUID(as_uuid=True),
@@ -57,11 +95,19 @@ class Shipment(Base):
         nullable=True
     )
 
+    # --------------------------------------------------------
+    # Driver
+    # --------------------------------------------------------
+
     driver_id = Column(
         UUID(as_uuid=True),
         ForeignKey("drivers.driver_id"),
         nullable=True
     )
+
+    # --------------------------------------------------------
+    # Status
+    # --------------------------------------------------------
 
     status = Column(
         Enum(

@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.user import User, RoleEnum
+from app.models.driver import Driver
 from app.schemas.vehicle import (
     VehicleCreate,
     VehicleUpdate,
@@ -17,7 +18,7 @@ from app.crud.vehicle import (
     update_vehicle,
     delete_vehicle,
 )
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_roles
 
 
 router = APIRouter(
@@ -70,6 +71,23 @@ def get_vehicles(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # Driver: return only their assigned vehicle
+    if current_user.role == RoleEnum.Driver or str(current_user.role) == "Driver":
+        driver_profile = (
+            db.query(Driver)
+            .filter(Driver.user_id == current_user.user_id)
+            .first()
+        )
+        if not driver_profile:
+            return []
+        assigned = [
+            v for v in get_all_vehicles(db)
+            if str(v.vehicle_id) in [
+                str(veh.vehicle_id) for veh in
+                (driver_profile.vehicles or [])
+            ]
+        ]
+        return assigned
 
     return get_all_vehicles(db)
 

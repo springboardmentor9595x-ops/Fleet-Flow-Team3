@@ -1,14 +1,38 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+)
+
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.shipment import Shipment, ShipmentStatus
-from app.models.vehicle import Vehicle
+
+from app.schemas.shipment import (
+    ShipmentCreate,
+    ShipmentUpdate,
+    ShipmentOut,
+)
+
+from app.crud.shipment import (
+    create_shipment,
+    get_shipments,
+    get_shipment,
+    update_shipment,
+    delete_shipment,
+)
+
+from app.core.deps import get_current_user, require_roles
+
+from app.models.user import User, RoleEnum
 from app.models.driver import Driver
 
+
+# ============================================================
+# ROUTER
+# ============================================================
 
 router = APIRouter(
     prefix="/shipments",
@@ -16,324 +40,169 @@ router = APIRouter(
 )
 
 
-# =========================================================
-# SCHEMAS
-# =========================================================
+# ============================================================
+# CREATE SHIPMENT
+# Admin / FleetManager / Dispatcher
+# ============================================================
 
-class ShipmentCreate(BaseModel):
-    tracking_number: str
-    source: str
-    destination: str
-    customer_name: str
-    shipment_weight: float
-    vehicle_id: UUID | None = None
-    driver_id: UUID | None = None
-
-
-class ShipmentUpdate(BaseModel):
-    tracking_number: str | None = None
-    source: str | None = None
-    destination: str | None = None
-    customer_name: str | None = None
-    shipment_weight: float | None = None
-    vehicle_id: UUID | None = None
-    driver_id: UUID | None = None
-
-
-class ShipmentStatusUpdate(BaseModel):
-    status: ShipmentStatus
-
-
-class ShipmentOut(BaseModel):
-    shipment_id: UUID
-    tracking_number: str
-    source: str
-    destination: str
-    customer_name: str
-    shipment_weight: float
-    vehicle_id: UUID | None = None
-    driver_id: UUID | None = None
-    status: ShipmentStatus
-
-    class Config:
-        from_attributes = True
+@router.post(
+    "/",
+    response_model=ShipmentOut,
+    status_code=201,
+)
+def create_shipment_api(
+    shipment_in: ShipmentCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(
+        require_roles(
+            RoleEnum.Admin,
+            RoleEnum.FleetManager,
+            RoleEnum.Dispatcher,
+        )
+    ),
+):
+    return create_shipment(
+        db=db,
+        tracking_number=shipment_in.tracking_number,
+        source=shipment_in.source,
+        destination=shipment_in.destination,
+        customer_name=shipment_in.customer_name,
+        shipment_weight=shipment_in.shipment_weight,
+        vehicle_id=shipment_in.vehicle_id,
+        driver_id=shipment_in.driver_id,
+        status=shipment_in.status,
+    )
 
 
-# =========================================================
-# GET ALL SHIPMENTS
-# =========================================================
+# ============================================================
+# GET ALL SHIPMENTS — scoped by role
+# Admin / FleetManager / Dispatcher: all
+# Driver: only their own (via driver profile)
+# ============================================================
 
 @router.get(
     "/",
     response_model=list[ShipmentOut],
 )
-def get_shipments(
+def get_shipments_api(
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    return db.query(Shipment).all()
-
-
-# =========================================================
-# CREATE SHIPMENT
-# =========================================================
-
-@router.post(
-    "/",
-    response_model=ShipmentOut,
-    status_code=status.HTTP_201_CREATED,
-)
-def create_shipment(
-    shipment_data: ShipmentCreate,
-    db: Session = Depends(get_db),
-):
-
-    # Validate vehicle if provided
-    if shipment_data.vehicle_id is not None:
-        vehicle = (
-            db.query(Vehicle)
-            .filter(Vehicle.vehicle_id == shipment_data.vehicle_id)
-            .first()
-        )
-
-        if not vehicle:
-            raise HTTPException(
-                status_code=404,
-                detail="Vehicle not found",
-            )
-
-    # Validate driver if provided
-    if shipment_data.driver_id is not None:
+    # If Driver: find their driver profile, return only their shipments
+    if current_user.role == RoleEnum.Driver or str(current_user.role) == "Driver":
         driver = (
             db.query(Driver)
-            .filter(Driver.driver_id == shipment_data.driver_id)
+            .filter(Driver.user_id == current_user.user_id)
             .first()
         )
-
         if not driver:
-            raise HTTPException(
-                status_code=404,
-                detail="Driver not found",
-            )
+            return []
+        from app.models.shipment import Shipment
+        return (
+            db.query(Shipment)
+            .filter(Shipment.driver_id == driver.driver_id)
+            .all()
+        )
 
-    # Default status
-    shipment_status = ShipmentStatus.Created
-
-    # If both vehicle and driver are provided,
-    # shipment is automatically assigned
-    if (
-        shipment_data.vehicle_id is not None
-        and shipment_data.driver_id is not None
-    ):
-        shipment_status = ShipmentStatus.Assigned
-
-    shipment = Shipment(
-        tracking_number=shipment_data.tracking_number,
-        source=shipment_data.source,
-        destination=shipment_data.destination,
-        customer_name=shipment_data.customer_name,
-        shipment_weight=shipment_data.shipment_weight,
-        vehicle_id=shipment_data.vehicle_id,
-        driver_id=shipment_data.driver_id,
-        status=shipment_status,
-    )
-
-    db.add(shipment)
-    db.commit()
-    db.refresh(shipment)
-
-    return shipment
+    # Admin / FleetManager / Dispatcher: all shipments
+    return get_shipments(db)
 
 
-# =========================================================
-# GET SINGLE SHIPMENT
-# =========================================================
+# ============================================================
+# GET ONE SHIPMENT
+# Admin / FleetManager / Dispatcher: any
+# Driver: only their own
+# ============================================================
 
 @router.get(
     "/{shipment_id}",
     response_model=ShipmentOut,
 )
-def get_shipment(
+def get_shipment_api(
     shipment_id: UUID,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-
-    shipment = (
-        db.query(Shipment)
-        .filter(Shipment.shipment_id == shipment_id)
-        .first()
-    )
+    shipment = get_shipment(db, shipment_id)
 
     if not shipment:
-        raise HTTPException(
-            status_code=404,
-            detail="Shipment not found",
+        raise HTTPException(status_code=404, detail="Shipment not found")
+
+    # Driver: can only view their own
+    if current_user.role == RoleEnum.Driver or str(current_user.role) == "Driver":
+        driver = (
+            db.query(Driver)
+            .filter(Driver.user_id == current_user.user_id)
+            .first()
         )
+        if not driver or str(shipment.driver_id) != str(driver.driver_id):
+            raise HTTPException(status_code=403, detail="You can only view your own shipments")
 
     return shipment
 
 
-# =========================================================
+# ============================================================
 # UPDATE SHIPMENT
-# =========================================================
+# Admin / FleetManager / Dispatcher
+# ============================================================
 
 @router.put(
     "/{shipment_id}",
     response_model=ShipmentOut,
 )
-def update_shipment(
+def update_shipment_api(
     shipment_id: UUID,
-    shipment_data: ShipmentUpdate,
+    shipment_in: ShipmentUpdate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(
+        require_roles(
+            RoleEnum.Admin,
+            RoleEnum.FleetManager,
+            RoleEnum.Dispatcher,
+        )
+    ),
 ):
-
-    shipment = (
-        db.query(Shipment)
-        .filter(Shipment.shipment_id == shipment_id)
-        .first()
-    )
+    shipment = get_shipment(db, shipment_id)
 
     if not shipment:
-        raise HTTPException(
-            status_code=404,
-            detail="Shipment not found",
-        )
+        raise HTTPException(status_code=404, detail="Shipment not found")
 
-    # -----------------------------------------
-    # Update basic shipment information
-    # -----------------------------------------
-
-    if shipment_data.tracking_number is not None:
-        shipment.tracking_number = shipment_data.tracking_number
-
-    if shipment_data.source is not None:
-        shipment.source = shipment_data.source
-
-    if shipment_data.destination is not None:
-        shipment.destination = shipment_data.destination
-
-    if shipment_data.customer_name is not None:
-        shipment.customer_name = shipment_data.customer_name
-
-    if shipment_data.shipment_weight is not None:
-        shipment.shipment_weight = shipment_data.shipment_weight
-
-    # -----------------------------------------
-    # Validate and update vehicle
-    # -----------------------------------------
-
-    if shipment_data.vehicle_id is not None:
-
-        vehicle = (
-            db.query(Vehicle)
-            .filter(Vehicle.vehicle_id == shipment_data.vehicle_id)
-            .first()
-        )
-
-        if not vehicle:
-            raise HTTPException(
-                status_code=404,
-                detail="Vehicle not found",
-            )
-
-        shipment.vehicle_id = shipment_data.vehicle_id
-
-    # -----------------------------------------
-    # Validate and update driver
-    # -----------------------------------------
-
-    if shipment_data.driver_id is not None:
-
-        driver = (
-            db.query(Driver)
-            .filter(Driver.driver_id == shipment_data.driver_id)
-            .first()
-        )
-
-        if not driver:
-            raise HTTPException(
-                status_code=404,
-                detail="Driver not found",
-            )
-
-        shipment.driver_id = shipment_data.driver_id
-
-    # -----------------------------------------
-    # Automatically assign shipment
-    # -----------------------------------------
-
-    if (
-        shipment.vehicle_id is not None
-        and shipment.driver_id is not None
-    ):
-        shipment.status = ShipmentStatus.Assigned
-
-    db.commit()
-    db.refresh(shipment)
+    update_shipment(
+        db=db,
+        shipment=shipment,
+        tracking_number=shipment_in.tracking_number,
+        source=shipment_in.source,
+        destination=shipment_in.destination,
+        customer_name=shipment_in.customer_name,
+        shipment_weight=shipment_in.shipment_weight,
+        vehicle_id=shipment_in.vehicle_id,
+        driver_id=shipment_in.driver_id,
+        status=shipment_in.status,
+    )
 
     return shipment
 
 
-# =========================================================
-# UPDATE SHIPMENT STATUS
-# =========================================================
-
-@router.patch(
-    "/{shipment_id}/status",
-    response_model=ShipmentOut,
-)
-def update_shipment_status(
-    shipment_id: UUID,
-    status_data: ShipmentStatusUpdate,
-    db: Session = Depends(get_db),
-):
-
-    shipment = (
-        db.query(Shipment)
-        .filter(Shipment.shipment_id == shipment_id)
-        .first()
-    )
-
-    if not shipment:
-        raise HTTPException(
-            status_code=404,
-            detail="Shipment not found",
-        )
-
-    shipment.status = status_data.status
-
-    db.commit()
-    db.refresh(shipment)
-
-    return shipment
-
-
-# =========================================================
+# ============================================================
 # DELETE SHIPMENT
-# =========================================================
+# Admin only (hard delete); Dispatcher/FM use status=Cancelled
+# ============================================================
 
 @router.delete(
     "/{shipment_id}",
 )
-def delete_shipment(
+def delete_shipment_api(
     shipment_id: UUID,
     db: Session = Depends(get_db),
+    current_user: User = Depends(
+        require_roles(RoleEnum.Admin)
+    ),
 ):
-
-    shipment = (
-        db.query(Shipment)
-        .filter(Shipment.shipment_id == shipment_id)
-        .first()
-    )
+    shipment = get_shipment(db, shipment_id)
 
     if not shipment:
-        raise HTTPException(
-            status_code=404,
-            detail="Shipment not found",
-        )
+        raise HTTPException(status_code=404, detail="Shipment not found")
 
-    db.delete(shipment)
-    db.commit()
+    delete_shipment(db, shipment)
 
-    return {
-        "message": "Shipment deleted successfully"
-    }
+    return {"message": "Shipment deleted successfully"}
