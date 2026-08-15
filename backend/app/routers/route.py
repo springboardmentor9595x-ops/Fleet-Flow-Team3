@@ -17,11 +17,14 @@ class RouteRequest(BaseModel):
 
     end_lat: float = Field(..., ge=-90, le=90)
     end_lon: float = Field(..., ge=-180, le=180)
+    
+    route_type: str = "Fastest"
 
 
 class RouteResponse(BaseModel):
     distance_meters: float
     duration_seconds: float
+    formatted_duration: str | None = None
     geometry: dict
     cached: bool
 
@@ -42,6 +45,7 @@ async def calculate_route(
             start_lon=request.start_lon,
             end_lat=request.end_lat,
             end_lon=request.end_lon,
+            route_type=request.route_type,
         )
 
         return result

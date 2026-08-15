@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Plus,
   Pencil,
@@ -6,12 +7,15 @@ import {
   Search,
   X,
   RefreshCw,
+  Eye,
 } from "lucide-react";
 
 import Sidebar from "../../components/layout/Sidebar";
 import api from "../../api/axios";
 
 export default function Shipments() {
+  const navigate = useNavigate();
+  
   const [shipments, setShipments] = useState([]);
   const [vehicles, setVehicles] = useState([]);
   const [drivers, setDrivers] = useState([]);
@@ -32,6 +36,7 @@ export default function Shipments() {
     vehicle_id: "",
     driver_id: "",
     status: "Created",
+    expected_delivery: "",
   });
 
   // =========================================================
@@ -106,6 +111,7 @@ export default function Shipments() {
       vehicle_id: "",
       driver_id: "",
       status: "Created",
+      expected_delivery: "",
     });
   };
 
@@ -150,6 +156,8 @@ export default function Shipments() {
 
       status:
         shipment.status || "Created",
+      expected_delivery: 
+        shipment.expected_delivery || "",
     });
 
     setShowForm(true);
@@ -244,6 +252,8 @@ export default function Shipments() {
 
         status:
           form.status || "Created",
+        expected_delivery:
+          form.expected_delivery || null,
       };
 
       console.log(
@@ -748,6 +758,16 @@ export default function Shipments() {
                               }
                             >
                               <button
+                                style={styles.actionButton}
+                                onClick={() =>
+                                  navigate(`/shipments/${shipment.shipment_id}`)
+                                }
+                                title="View Details"
+                              >
+                                <Eye size={16} />
+                              </button>
+
+                              <button
                                 style={
                                   styles.editButton
                                 }
@@ -1130,6 +1150,20 @@ export default function Shipments() {
                     Cancelled
                   </option>
                 </select>
+
+                {/* EXPECTED DELIVERY */}
+                
+                <label style={styles.label}>
+                  Expected Delivery
+                </label>
+                <input
+                  type="datetime-local"
+                  name="expected_delivery"
+                  value={form.expected_delivery || ""}
+                  onChange={handleChange}
+                  style={styles.input}
+                  disabled={saving}
+                />
 
                 {/* BUTTONS */}
 

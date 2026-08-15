@@ -1,5 +1,7 @@
 from uuid import UUID
 from datetime import datetime
+import json
+from app.services.routing import get_route, geocode_address
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from app.models.shipment import ShipmentStatus
@@ -73,6 +75,8 @@ class TripOut(BaseModel):
     distance: float | None
     status: str | None
     route_type: str | None
+    estimated_duration: str | None = None
+    route_geometry: str | None = None
 
     class Config:
         from_attributes = True
@@ -134,7 +138,7 @@ def get_trips(
     response_model=TripOut,
     status_code=status.HTTP_201_CREATED,
 )
-def create_trip(
+async def create_trip(
     trip_data: TripCreate,
     db: Session = Depends(get_db),
     current_user=Depends(
@@ -201,6 +205,25 @@ def create_trip(
         )
 
     # -----------------------------------------------------
+    # Generate Route
+    # -----------------------------------------------------
+    final_distance = trip_data.distance
+    route_geometry_str = None
+    est_duration_str = None
+    
+    try:
+        s_lat, s_lon = await geocode_address(trip_data.start_location)
+        d_lat, d_lon = await geocode_address(trip_data.destination)
+        
+        route_res = await get_route(s_lat, s_lon, d_lat, d_lon, route_type=trip_data.route_type or "Fastest")
+        
+        final_distance = route_res.get("distance_meters", final_distance)
+        route_geometry_str = json.dumps(route_res.get("geometry"))
+        est_duration_str = route_res.get("formatted_duration")
+    except Exception as e:
+        print(f"Routing failed: {e}")
+
+    # -----------------------------------------------------
     # Create trip
     # -----------------------------------------------------
 
@@ -215,9 +238,11 @@ def create_trip(
         start_time=trip_data.start_time,
         end_time=trip_data.end_time,
 
-        distance=trip_data.distance,
+        distance=final_distance,
 
         route_type=trip_data.route_type or "Fastest",
+        route_geometry=route_geometry_str,
+        estimated_duration=est_duration_str,
 
         status="Scheduled",
     )
@@ -588,4 +613,45 @@ def end_trip(
     db.commit()
     db.refresh(trip)
 
+    return trip
+
+
+# =========================================================
+# RECALCULATE ROUTE
+# =========================================================
+
+class RecalculateRequest(BaseModel):
+    current_lat: float
+    current_lon: float
+
+@router.post(
+    "/{trip_id}/recalculate",
+    response_model=TripOut,
+)
+async def recalculate_route(
+    trip_id: UUID,
+    req: RecalculateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    trip = db.query(Trip).filter(Trip.trip_id == trip_id).first()
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+        
+    try:
+        d_lat, d_lon = await geocode_address(trip.destination)
+        route_res = await get_route(
+            req.current_lat, req.current_lon, 
+            d_lat, d_lon, 
+            route_type=trip.route_type or "Fastest"
+        )
+        
+        trip.distance = route_res.get("distance_meters")
+        trip.route_geometry = json.dumps(route_res.get("geometry"))
+        db.commit()
+        db.refresh(trip)
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+        
     return trip

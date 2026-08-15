@@ -8,6 +8,7 @@ import {
   Marker,
   Popup,
   Circle,
+  Polyline,
   useMap,
 } from "react-leaflet";
 
@@ -46,6 +47,23 @@ function makeVehicleIcon(label, isSelected) {
     popupAnchor: [0, -54],
   });
 }
+
+function makeDotIcon(color) {
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24">
+      <circle cx="12" cy="12" r="10" fill="${color}" stroke="white" stroke-width="2"/>
+    </svg>`;
+  return L.divIcon({
+    html: svg,
+    className: "",
+    iconSize: [24, 24],
+    iconAnchor: [12, 12],
+    popupAnchor: [0, -12],
+  });
+}
+
+const startIcon = makeDotIcon("#ef4444"); // Red
+const endIcon = makeDotIcon("#10b981"); // Green
 
 const destinationIcon = new L.Icon({
   iconUrl:
@@ -101,6 +119,7 @@ export default function LiveTracking() {
 
   // All vehicles from API
   const [vehicles, setVehicles] = useState([]);
+  const [trips, setTrips] = useState([]);
   const [loadingVehicles, setLoadingVehicles] = useState(true);
 
   // GPS data keyed by vehicle_id
@@ -116,10 +135,13 @@ export default function LiveTracking() {
   // ============================================================
 
   useEffect(() => {
-    api
-      .get("/vehicles/")
-      .then((res) => {
-        setVehicles(res.data);
+    Promise.all([
+      api.get("/vehicles/"),
+      api.get("/trips/")
+    ])
+      .then(([vRes, tRes]) => {
+        setVehicles(vRes.data);
+        setTrips(tRes.data);
         setLoadingVehicles(false);
       })
       .catch(() => setLoadingVehicles(false));
@@ -416,6 +438,48 @@ export default function LiveTracking() {
                 </Popup>
               </Marker>
 
+              {/* Route Overlay */}
+              {selectedVehicle && (() => {
+                const activeTrip = trips.find(t => 
+                  t.vehicle_id === selectedVehicle.vehicle_id && t.status === "In Transit"
+                ) || trips.find(t => 
+                  t.vehicle_id === selectedVehicle.vehicle_id && t.status === "Scheduled"
+                );
+                
+                if (activeTrip?.route_geometry) {
+                  try {
+                    const geo = typeof activeTrip.route_geometry === "string" 
+                      ? JSON.parse(activeTrip.route_geometry)
+                      : activeTrip.route_geometry;
+                      
+                    if (geo && geo.coordinates) {
+                      // OSRM returns [lon, lat], Leaflet Polyline expects [lat, lon]
+                      const latLngs = geo.coordinates.map(coord => [coord[1], coord[0]]);
+                      const startPos = latLngs[0];
+                      const endPos = latLngs[latLngs.length - 1];
+
+                      return (
+                        <>
+                          <Polyline 
+                            positions={latLngs} 
+                            pathOptions={{ color: '#3b82f6', weight: 4, opacity: 0.8 }} 
+                          />
+                          <Marker position={startPos} icon={startIcon}>
+                            <Popup>Route Source</Popup>
+                          </Marker>
+                          <Marker position={endPos} icon={endIcon}>
+                            <Popup>Route Destination</Popup>
+                          </Marker>
+                        </>
+                      );
+                    }
+                  } catch (e) {
+                    console.error("Failed to parse route_geometry", e);
+                  }
+                }
+                return null;
+              })()}
+
               {/* All vehicles with GPS */}
               {vehicles.map((v, idx) => {
                 const gps = gpsMap[v.vehicle_id];
@@ -490,6 +554,12 @@ export default function LiveTracking() {
               <h2 style={styles.detailTitle}>
                 {selectedVehicle.registration_number} — Live Detail
               </h2>
+              
+              {selectedGps?.event && selectedGps.event.includes("Deviation") && (
+                <div style={{ padding: "12px", backgroundColor: "#fee2e2", color: "#b91c1c", borderRadius: "8px", marginBottom: "16px", fontWeight: "bold" }}>
+                  ⚠️ Route Deviation Detected. Recalculating...
+                </div>
+              )}
 
               {!selectedGps ? (
                 <div style={styles.waiting}>
@@ -511,6 +581,10 @@ export default function LiveTracking() {
                         ? `${selectedGps.distance_to_destination} m`
                         : "--"
                     }
+                  />
+                  <DetailItem
+                    label="ETA"
+                    value={selectedGps.formatted_eta || "--"}
                   />
                   <DetailItem
                     label="Geofence"

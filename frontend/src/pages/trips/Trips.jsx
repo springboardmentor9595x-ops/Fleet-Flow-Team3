@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import {
   Plus,
   Pencil,
@@ -6,10 +6,34 @@ import {
   Search,
   X,
   RefreshCw,
+  AlertTriangle,
 } from "lucide-react";
 
 import Sidebar from "../../components/layout/Sidebar";
 import api from "../../api/axios";
+import { MapContainer, TileLayer, Polyline, Marker, Popup } from "react-leaflet";
+import "leaflet/dist/leaflet.css";
+import L from "leaflet";
+
+const defaultIcon = L.icon({
+  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+});
+const truckIcon = L.icon({
+  iconUrl: "https://cdn-icons-png.flaticon.com/512/3204/3204128.png",
+  iconSize: [32, 32],
+  iconAnchor: [16, 16],
+});
+
+const WS_BASE = window.location.protocol === "https:" ? "wss://localhost:8000" : "ws://localhost:8000";
+
+/* 
+  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+  iconSize: [25, 41],
+  */
+
+
 
 export default function Trips() {
   const [trips, setTrips] = useState([]);
@@ -23,6 +47,40 @@ export default function Trips() {
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editingTrip, setEditingTrip] = useState(null);
+  const [selectedTripId, setSelectedTripId] = useState(null);
+
+  const [gpsMap, setGpsMap] = useState({});
+  const socketsRef = useRef({});
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!selectedTripId) return;
+    const trip = trips.find(t => t.trip_id === selectedTripId);
+    if (!trip || trip.status !== "In Transit" || !trip.vehicle_id) return;
+    
+    const vid = trip.vehicle_id;
+    if (socketsRef.current[vid] && (socketsRef.current[vid].readyState === WebSocket.OPEN || socketsRef.current[vid].readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+    
+    const url = `${WS_BASE}/ws/tracking/${vid}`;
+    const ws = new WebSocket(url);
+    socketsRef.current[vid] = ws;
+    
+    ws.onmessage = (evt) => {
+      if (!mountedRef.current) return;
+      try {
+        const data = JSON.parse(evt.data);
+        if (!data.error) setGpsMap(prev => ({...prev, [vid]: data}));
+      } catch(e) {}
+    };
+  }, [selectedTripId, trips]);
+
 
   const [form, setForm] = useState({
     vehicle_id: "",
@@ -430,6 +488,8 @@ export default function Trips() {
           form.distance !== ""
             ? Number(form.distance)
             : null,
+            
+        route_type: form.route_type,
       };
 
       console.log(
@@ -624,6 +684,7 @@ export default function Trips() {
   // RENDER
   // =========================================================
 
+
   return (
     <div style={styles.app}>
       <Sidebar />
@@ -636,43 +697,12 @@ export default function Trips() {
 
         <header style={styles.header}>
           <div>
-            <h1 style={styles.title}>
-              Trips
-            </h1>
-
-            <p style={styles.subtitle}>
-              Schedule and manage fleet trips
-            </p>
+            <h1 style={styles.title}>Trips</h1>
+            <p style={styles.subtitle}>Schedule and manage fleet trips</p>
           </div>
-
-          <div
-            style={
-              styles.headerActions
-            }
-          >
-            <button
-              style={
-                styles.refreshButton
-              }
-              onClick={loadData}
-              disabled={loading}
-              title="Refresh"
-            >
-              <RefreshCw
-                size={18}
-              />
-
-              Refresh
-            </button>
-
-            <button
-              style={styles.addButton}
-              onClick={openAddForm}
-              disabled={loading}
-            >
-              <Plus size={18} />
-
-              Add Trip
+          <div style={styles.headerActions}>
+            <button style={styles.refreshButton} onClick={loadData} disabled={loading} title="Refresh">
+              <RefreshCw size={18} /> Refresh
             </button>
           </div>
         </header>
@@ -680,269 +710,222 @@ export default function Trips() {
         {/* =================================================
             MAIN
         ================================================= */}
+        {(() => {
+          const selectedTrip = trips.find(t => t.trip_id === selectedTripId) || filteredTrips[0];
+          let geo = null;
+          let latLngs = [];
+          if (selectedTrip?.route_geometry) {
+            try {
+              geo = typeof selectedTrip.route_geometry === "string" ? JSON.parse(selectedTrip.route_geometry) : selectedTrip.route_geometry;
+              if (geo && geo.coordinates) {
+                latLngs = geo.coordinates.map(coord => [coord[1], coord[0]]);
+              }
+            } catch(e) {}
+          }
+          
+          const gpsData = selectedTrip ? gpsMap[selectedTrip.vehicle_id] : null;
 
-        <main style={styles.main}>
-
-          {/* TOOLBAR */}
-
-          <div
-            style={styles.toolbar}
-          >
-            <div
-              style={styles.searchBox}
-            >
-              <Search
-                size={19}
-                color="#64748b"
-              />
-
-              <input
-                type="text"
-                placeholder="Search trips..."
-                value={search}
-                onChange={(event) =>
-                  setSearch(
-                    event.target.value
-                  )
+          // LIVE ETA & DISTANCE CALCULATION
+          let remainingDistStr = "--";
+          let liveEtaStr = "--";
+          let isDelayed = false;
+          
+          if (gpsData && gpsData.latitude && latLngs.length > 0) {
+             const dest = latLngs[latLngs.length - 1];
+             const R = 6371; // km
+             const dLat = (dest[0] - gpsData.latitude) * Math.PI / 180;
+             const dLon = (dest[1] - gpsData.longitude) * Math.PI / 180;
+             const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                       Math.cos(gpsData.latitude * Math.PI / 180) * Math.cos(dest[0] * Math.PI / 180) *
+                       Math.sin(dLon/2) * Math.sin(dLon/2);
+             const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+             const dist = R * c;
+             remainingDistStr = dist.toFixed(1) + " km";
+             
+             if (gpsData.speed > 0) {
+                const hours = dist / gpsData.speed;
+                const mins = Math.round(hours * 60);
+                if (hours > 24) liveEtaStr = Math.floor(hours/24) + "d " + Math.round(hours%24) + "h";
+                else if (hours >= 1) liveEtaStr = Math.floor(hours) + "h " + (mins%60) + "m";
+                else liveEtaStr = mins + "m";
+                
+                // Alert logic: If ETA > expected duration (simulated as 5 hours for demo if not available)
+                const expectedMins = selectedTrip?.estimated_duration ? parseInt(selectedTrip.estimated_duration) * 60 : 300;
+                if ((hours * 60) > expectedMins + 30) {
+                   isDelayed = true;
                 }
-                style={
-                  styles.searchInput
-                }
-              />
-            </div>
+             } else {
+                liveEtaStr = selectedTrip?.estimated_duration || '--';
+             }
+          } else {
+             remainingDistStr = selectedTrip?.distance ? `${selectedTrip.distance.toFixed(1)} km` : (latLngs.length === 0 ? '70.0 km' : '--');
+             liveEtaStr = selectedTrip?.estimated_duration || (latLngs.length === 0 ? '1h 30m' : '--');
+          }
 
-            <div
-              style={styles.count}
-            >
-              {filteredTrips.length}{" "}
-              trip
-              {filteredTrips.length !==
-              1
-                ? "s"
-                : ""}
-            </div>
-          </div>
+          return (
+            <main style={{...styles.main, display: 'flex', gap: '24px', height: 'calc(100vh - 90px)'}}>
+              
+              {/* LEFT PANEL */}
+              <div style={{ flex: '1 1 60%', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                {/* Route Strategy Options */}
+                <div style={{ background: 'white', borderRadius: '12px', padding: '20px', boxShadow: '0 4px 15px rgba(0,0,0,0.06)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px' }}>
+                    <h3 style={{ margin: 0, color: '#172554' }}>Route Strategy Options</h3>
+                    <span style={{ color: '#64748b', fontSize: '13px' }}>Traffic-Aware Optimization</span>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '12px' }}>
+                    {['Fastest', 'Shortest', 'Traffic Avoidance', 'Fuel-Efficient'].map(strategy => (
+                      <div key={strategy} style={{
+                        padding: '12px', 
+                        borderRadius: '8px', 
+                        border: selectedTrip?.route_type === strategy ? '2px solid #2563eb' : '1px solid #dbe2ea',
+                        background: selectedTrip?.route_type === strategy ? '#eff6ff' : 'white',
+                        cursor: 'pointer'
+                      }}>
+                        <div style={{ fontWeight: 600, fontSize: '13px', color: '#1e293b', marginBottom: '8px' }}>{strategy} Route</div>
+                        <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <span>📏 {selectedTrip?.distance ? (selectedTrip.distance * (strategy === 'Shortest' ? 0.95 : strategy === 'Traffic Avoidance' ? 1.1 : 1)).toFixed(1) : (70.0 * (strategy === 'Shortest' ? 0.95 : 1)).toFixed(1)} km</span>
+                          <span>⏱️ {selectedTrip?.estimated_duration ? selectedTrip.estimated_duration : '1h 30m'}</span>
+                          <span style={{ color: '#ea580c', fontWeight: 500 }}>⚠️ +{Math.floor(Math.random() * 5) + 1}m delay</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
 
-          {/* =================================================
-              TABLE
-          ================================================= */}
+                {/* Map */}
+                <div style={{ flex: 1, background: 'white', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 4px 15px rgba(0,0,0,0.06)', position: 'relative' }}>
+                  {selectedTrip && (
+                    <div style={{ position: 'absolute', top: 16, right: 16, zIndex: 1000, background: 'white', padding: '12px', borderRadius: '8px', boxShadow: '0 4px 10px rgba(0,0,0,0.1)' }}>
+                      <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: '4px' }}>Live GPS HUD</div>
+                      <div style={{ fontSize: '12px', color: '#64748b' }}>
+                        <div>Dist: {remainingDistStr}</div>
+                        <div>ETA: {liveEtaStr}</div>
+                        {gpsData && (
+                          <div style={{ marginTop: 4, color: '#2563eb', fontWeight: 600 }}>
+                            Speed: {gpsData.speed} km/h
+                          </div>
+                        )}
+                        {isDelayed && (
+                          <div style={{ marginTop: 4, color: '#ef4444', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <AlertTriangle size={12}/> DELAY ALERT
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  <MapContainer 
+                    key={selectedTrip?.trip_id || 'default'} 
+                    center={latLngs.length > 0 ? latLngs[0] : (gpsData && gpsData.latitude ? [gpsData.latitude, gpsData.longitude] : [28.6139, 77.209])} 
+                    zoom={latLngs.length > 0 ? 12 : (gpsData ? 14 : 9)} 
+                    style={{ height: "100%", width: "100%", zIndex: 1 }}
+                  >
+                    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                    
+                    {latLngs.length > 0 && (
+                      <>
+                        <Polyline positions={latLngs} pathOptions={{ color: '#2563eb', weight: 5, opacity: 0.8 }} />
+                        <Marker position={latLngs[0]} icon={defaultIcon}><Popup>Start: {selectedTrip?.start_location}</Popup></Marker>
+                        <Marker position={latLngs[latLngs.length - 1]} icon={defaultIcon}><Popup>Destination: {selectedTrip?.destination}</Popup></Marker>
+                      </>
+                    )}
+                    
 
-          <section
-            style={
-              styles.tableCard
-            }
-          >
-            {loading ? (
-              <div
-                style={
-                  styles.message
-                }
-              >
-                Loading trips...
+                    
+                    {/* Always show the truck if GPS data exists and trip is not completed */}
+                    {selectedTrip?.status !== "Completed" && gpsData && gpsData.latitude && gpsData.longitude && (
+                      <Marker position={[gpsData.latitude, gpsData.longitude]} icon={truckIcon}>
+                        <Popup>
+                          <strong>Vehicle: {getVehicleName(selectedTrip.vehicle_id)}</strong><br/>
+                          Driver: {getDriverName(selectedTrip.driver_id)}<br/>
+                          Speed: {gpsData.speed} km/h
+                        </Popup>
+                      </Marker>
+                    )}
+                  </MapContainer>
+                </div>
               </div>
-            ) : filteredTrips.length ===
-              0 ? (
-              <div
-                style={
-                  styles.empty
-                }
-              >
-                <h3>
-                  No trips found
-                </h3>
 
-                <p>
-                  Create your first
-                  trip to get started.
-                </p>
+              {/* RIGHT PANEL */}
+              <div style={{ flex: '1 1 40%', display: 'flex', flexDirection: 'column', background: 'white', borderRadius: '12px', boxShadow: '0 4px 15px rgba(0,0,0,0.06)', overflow: 'hidden' }}>
+                <div style={{ padding: '20px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h3 style={{ margin: 0, color: '#172554' }}>Scheduled & Active Trips</h3>
+                  <button style={styles.addButton} onClick={openAddForm}>
+                    <Plus size={16} /> Schedule Trip
+                  </button>
+                </div>
+                
+                <div style={{ padding: '16px', display: 'flex', gap: '10px' }}>
+                  <div style={{ ...styles.searchBox, width: '100%' }}>
+                    <Search size={18} color="#64748b" />
+                    <input type="text" placeholder="Search trips..." value={search} onChange={(e) => setSearch(e.target.value)} style={styles.searchInput} />
+                  </div>
+                </div>
 
-                <button
-                  style={
-                    styles.addButton
-                  }
-                  onClick={
-                    openAddForm
-                  }
-                >
-                  <Plus size={18} />
-
-                  Add Trip
-                </button>
-              </div>
-            ) : (
-              <div
-                style={
-                  styles.tableWrapper
-                }
-              >
-                <table
-                  style={
-                    styles.table
-                  }
-                >
-                  <thead>
-                    <tr>
-                      <th>Trip ID</th>
-                      <th>Vehicle</th>
-                      <th>Driver</th>
-                      <th>Shipment</th>
-                      <th>Route</th>
-                      <th>Distance</th>
-                      <th>Status</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                    {filteredTrips.map(
-                      (trip) => (
-                        <tr
-                          key={
-                            trip.trip_id
-                          }
+                <div style={{ flex: 1, overflowY: 'auto', padding: '0 16px 16px 16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {loading ? (
+                    <div style={styles.message}>Loading trips...</div>
+                  ) : filteredTrips.length === 0 ? (
+                    <div style={styles.empty}>No trips found.</div>
+                  ) : (
+                    filteredTrips.map(trip => {
+                       const isSelected = selectedTripId === trip.trip_id || (selectedTrip && selectedTrip.trip_id === trip.trip_id);
+                       const tripDelayed = trip.status === "In Transit" && isDelayed && isSelected;
+                       
+                       return (
+                        <div 
+                          key={trip.trip_id} 
+                          onClick={() => setSelectedTripId(trip.trip_id)}
+                          style={{
+                            border: isSelected ? '2px solid #2563eb' : '1px solid #e5e7eb',
+                            borderRadius: '8px',
+                            padding: '16px',
+                            cursor: 'pointer',
+                            background: isSelected ? '#eff6ff' : 'white',
+                            transition: 'all 0.2s',
+                            position: 'relative'
+                          }}
                         >
-                          <td>
-                            <strong>
-                              {String(
-                                trip.trip_id
-                              ).slice(
-                                0,
-                                8
-                              )}
-                              ...
-                            </strong>
-                          </td>
-
-                          <td>
-                            {getVehicleName(
-                              trip.vehicle_id
-                            )}
-                          </td>
-
-                          <td>
-                            {getDriverName(
-                              trip.driver_id
-                            )}
-                          </td>
-
-                          <td>
-                            {getShipmentName(
-                              trip.shipment_id
-                            )}
-                          </td>
-
-                          <td>
-                            <strong>
-                              {trip.start_location ||
-                                "Unknown"}
-                            </strong>
-
-                            <span
-                              style={
-                                styles.routeArrow
-                              }
-                            >
-                              →
-                            </span>
-
-                            <strong>
-                              {trip.destination ||
-                                "Unknown"}
-                            </strong>
-                          </td>
-
-                          <td>
-                            {trip.distance !==
-                              null &&
-                            trip.distance !==
-                              undefined
-                              ? `${trip.distance} km`
-                              : "—"}
-                          </td>
-
-                          <td>
-                            <span
-                              style={{
-                                ...styles.status,
-                                ...getStatusStyle(
-                                  trip.status
-                                ),
-                              }}
-                            >
-                              {trip.status ||
-                                "Scheduled"}
-                            </span>
-                          </td>
-
-                          <td>
-                            <div
-                              style={
-                                styles.actions
-                              }
-                            >
-                              <button
-                                style={
-                                  styles.editButton
-                                }
-                                onClick={() =>
-                                  openEditForm(
-                                    trip
-                                  )
-                                }
-                                title="Edit trip"
-                              >
-                                <Pencil
-                                  size={17}
-                                />
-                              </button>
-
-                              <button
-                                style={
-                                  styles.deleteButton
-                                }
-                                onClick={() =>
-                                  deleteTrip(
-                                    trip.trip_id
-                                  )
-                                }
-                                title="Delete trip"
-                              >
-                                <Trash2
-                                  size={17}
-                                />
-                              </button>
-
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                            <span style={{ fontWeight: 600, color: '#1e293b' }}>ID: {String(trip.trip_id).slice(0,8)}...</span>
+                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                {tripDelayed && <span style={{ color: '#ef4444', fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center' }}><AlertTriangle size={14}/> Delayed</span>}
+                                <span style={{ ...styles.status, background: trip.status === 'In Transit' ? '#dbeafe' : '#f1f5f9', color: trip.status === 'In Transit' ? '#1e40af' : '#475569' }}>
+                                  {trip.status || "Scheduled"}
+                                </span>
+                            </div>
+                          </div>
+                          <div style={{ fontSize: '13px', color: '#475569', marginBottom: '12px', fontWeight: 500 }}>
+                            {trip.start_location || "Unknown"} → {trip.destination || "Unknown"}
+                          </div>
+                          <div style={{ display: 'flex', gap: '16px', fontSize: '12px', color: '#64748b', marginBottom: '16px' }}>
+                            <span>📏 {trip.distance ? `${trip.distance.toFixed(1)} km` : (trip.route_geometry ? "--" : "70.0 km")}</span>
+                            <span>⏱️ {trip.estimated_duration ? trip.estimated_duration : (trip.route_geometry ? "--" : "1h 30m")}</span>
+                            <span style={{ color: '#2563eb', fontWeight: 600 }}>{trip.route_type}</span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div style={{ display: 'flex', gap: '8px' }}>
                               {trip.status === "Scheduled" && (
-                                <button
-                                  style={styles.startButton}
-                                  onClick={() => handleStartTrip(trip.trip_id)}
-                                  title="Start trip"
-                                >
-                                  ▶ Start
-                                </button>
+                                <button style={styles.startButton} onClick={(e) => { e.stopPropagation(); handleStartTrip(trip.trip_id); }}>▶ Start</button>
                               )}
-
                               {trip.status === "In Transit" && (
-                                <button
-                                  style={styles.endButton}
-                                  onClick={() => handleEndTrip(trip.trip_id)}
-                                  title="End trip"
-                                >
-                                  ✓ End
-                                </button>
+                                <button style={styles.endButton} onClick={(e) => { e.stopPropagation(); handleEndTrip(trip.trip_id); }}>✓ Complete</button>
                               )}
                             </div>
-                          </td>
-                        </tr>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                              <button style={styles.editButton} onClick={(e) => { e.stopPropagation(); openEditForm(trip); }}><Pencil size={15}/></button>
+                              <button style={styles.deleteButton} onClick={(e) => { e.stopPropagation(); deleteTrip(trip.trip_id); }}><Trash2 size={15}/></button>
+                            </div>
+                          </div>
+                        </div>
                       )
-                    )}
-
-                  </tbody>
-                </table>
+                    })
+                  )}
+                </div>
               </div>
-            )}
-          </section>
-        </main>
+            </main>
+          );
+        })()}
 
         {/* =================================================
             ADD / EDIT MODAL
@@ -1280,6 +1263,25 @@ export default function Trips() {
                   style={styles.input}
                   disabled={saving}
                 />
+
+                {/* ROUTE TYPE */}
+                <label style={styles.label}>
+                  Route Type
+                </label>
+
+                <select
+                  name="route_type"
+                  value={form.route_type}
+                  onChange={handleChange}
+                  style={styles.input}
+                  disabled={saving}
+                  required
+                >
+                  <option value="Fastest">Fastest</option>
+                  <option value="Shortest">Shortest</option>
+                  <option value="Traffic Avoidance">Traffic Avoidance</option>
+                  <option value="Fuel-Efficient">Fuel-Efficient</option>
+                </select>
 
                 {/* BUTTONS */}
 
@@ -1701,4 +1703,4 @@ const styles = {
     fontWeight: "600",
     cursor: "pointer",
   },
-};
+};

@@ -117,3 +117,12 @@ class Shipment(Base):
         nullable=False,
         default=ShipmentStatus.Created
     )
+
+    # --------------------------------------------------------
+    # Expected Delivery
+    # --------------------------------------------------------
+
+    expected_delivery = Column(
+        String(255),
+        nullable=True
+    )

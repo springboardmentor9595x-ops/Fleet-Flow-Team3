@@ -7,6 +7,7 @@ import Vehicles from "./pages/vehicles/Vehicles";
 import LiveTracking from "./pages/vehicles/LiveTracking";
 import Drivers from "./pages/drivers/Drivers";
 import Shipments from "./pages/shipments/Shipments";
+import ShipmentDetail from "./pages/shipments/ShipmentDetail";
 import Trips from "./pages/trips/Trips";
 import Maintenance from "./pages/maintenance/Maintenance";
 import FuelRecords from "./pages/fuel/FuelRecords";
@@ -34,6 +35,7 @@ export default function App() {
         <Route path="/drivers" element={<Drivers />} />
 
         <Route path="/shipments" element={<Shipments />} />
+        <Route path="/shipments/:id" element={<ShipmentDetail />} />
 
         <Route path="/trips" element={<Trips />} />
 

@@ -87,6 +87,22 @@ def delete_vehicle(
     db: Session,
     vehicle
 ):
+    from app.models.trip import Trip
+    from app.models.shipment import Shipment
+    from app.models.maintenance import VehicleMaintenance
+    from app.models.fuel_record import FuelRecord
+    from app.models.gps_tracking import GPSTracking
+
+    # Delete dependents to avoid Foreign Key violations
+    db.query(GPSTracking).filter(GPSTracking.vehicle_id == vehicle.vehicle_id).delete()
+    db.query(FuelRecord).filter(FuelRecord.vehicle_id == vehicle.vehicle_id).delete()
+    db.query(VehicleMaintenance).filter(VehicleMaintenance.vehicle_id == vehicle.vehicle_id).delete()
+    
+    # Delete trips (vehicle_id is not nullable)
+    db.query(Trip).filter(Trip.vehicle_id == vehicle.vehicle_id).delete()
+    
+    # Detach shipments (vehicle_id is nullable)
+    db.query(Shipment).filter(Shipment.vehicle_id == vehicle.vehicle_id).update({"vehicle_id": None})
 
     db.delete(vehicle)
     db.commit()

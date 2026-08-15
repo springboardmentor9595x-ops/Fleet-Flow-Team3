@@ -53,3 +53,13 @@ class Trip(Base):
         nullable=True,
         default="Fastest"
     )
+
+    route_geometry = Column(
+        String,
+        nullable=True
+    )
+
+    estimated_duration = Column(
+        String(50),
+        nullable=True
+    )

@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 
 from app.database import get_db
 from app.models.gps_tracking import GPSTracking
+from app.services.routing import format_duration
 
 load_dotenv()
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -241,6 +242,17 @@ async def vehicle_tracking(
             )
 
             # ------------------------------------------------
+            # ETA ESTIMATION
+            # ------------------------------------------------
+
+            eta_seconds = 0
+            formatted_eta = "--"
+            if speed > 0:
+                speed_ms = speed / 3.6
+                eta_seconds = distance / speed_ms
+                formatted_eta = format_duration(eta_seconds)
+
+            # ------------------------------------------------
             # GEOFENCE
             # ------------------------------------------------
 
@@ -318,6 +330,10 @@ async def vehicle_tracking(
                 ),
 
                 "distance_to_destination": distance,
+
+                "eta_seconds": eta_seconds,
+
+                "formatted_eta": formatted_eta,
 
                 "geofence_radius": (
                     GEOFENCE_RADIUS

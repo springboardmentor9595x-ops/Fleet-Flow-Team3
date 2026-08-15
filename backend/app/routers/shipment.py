@@ -1,4 +1,5 @@
 from uuid import UUID
+from datetime import datetime
 
 from fastapi import (
     APIRouter,
@@ -28,6 +29,8 @@ from app.core.deps import get_current_user, require_roles
 
 from app.models.user import User, RoleEnum
 from app.models.driver import Driver
+from app.models.shipment import Shipment, ShipmentStatus
+from app.models.shipment_event import ShipmentEvent
 
 
 # ============================================================
@@ -203,6 +206,115 @@ def delete_shipment_api(
     if not shipment:
         raise HTTPException(status_code=404, detail="Shipment not found")
 
-    delete_shipment(db, shipment)
+    shipment.status = ShipmentStatus.Cancelled
+    db.commit()
 
-    return {"message": "Shipment deleted successfully"}
+    return {"message": "Shipment cancelled successfully"}
+
+
+# ============================================================
+# GET SHIPMENT HISTORY (By Customer or Vehicle)
+# ============================================================
+
+@router.get(
+    "/history/search",
+    response_model=list[ShipmentOut],
+)
+def get_shipment_history(
+    customer_name: str | None = None,
+    vehicle_id: UUID | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    query = db.query(Shipment)
+    
+    if customer_name:
+        query = query.filter(Shipment.customer_name.ilike(f"%{customer_name}%"))
+    if vehicle_id:
+        query = query.filter(Shipment.vehicle_id == vehicle_id)
+        
+    return query.all()
+
+
+# ============================================================
+# GET DELAYED ALERTS
+# ============================================================
+
+@router.get(
+    "/alerts/delayed",
+    response_model=list[ShipmentOut],
+)
+def get_delayed_shipments(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(
+        require_roles(
+            RoleEnum.Admin,
+            RoleEnum.FleetManager,
+            RoleEnum.Dispatcher,
+        )
+    ),
+):
+    # Returns shipments with status Delayed or expected_delivery in the past
+    now_str = datetime.utcnow().isoformat()
+    
+    return db.query(Shipment).filter(
+        (Shipment.status == ShipmentStatus.Delayed) |
+        ((Shipment.expected_delivery != None) & (Shipment.expected_delivery < now_str))
+    ).all()
+
+
+# ============================================================
+# UPDATE DELIVERY STATUS
+# ============================================================
+
+from pydantic import BaseModel
+
+class StatusUpdate(BaseModel):
+    status: str
+    notes: str | None = None
+
+@router.put(
+    "/{shipment_id}/status",
+    response_model=ShipmentOut,
+)
+def update_delivery_status(
+    shipment_id: UUID,
+    status_update: StatusUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    shipment = get_shipment(db, shipment_id)
+
+    if not shipment:
+        raise HTTPException(status_code=404, detail="Shipment not found")
+        
+    # Driver can only update their own
+    if current_user.role == RoleEnum.Driver or str(current_user.role) == "Driver":
+        driver = (
+            db.query(Driver)
+            .filter(Driver.user_id == current_user.user_id)
+            .first()
+        )
+        if not driver or str(shipment.driver_id) != str(driver.driver_id):
+            raise HTTPException(status_code=403, detail="You can only update your own shipments")
+
+    # Validate status enum
+    try:
+        new_status = ShipmentStatus(status_update.status)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid shipment status")
+        
+    shipment.status = new_status
+    
+    # Create Event
+    event = ShipmentEvent(
+        shipment_id=shipment.shipment_id,
+        status=new_status.value,
+        notes=status_update.notes
+    )
+    
+    db.add(event)
+    db.commit()
+    db.refresh(shipment)
+    
+    return shipment

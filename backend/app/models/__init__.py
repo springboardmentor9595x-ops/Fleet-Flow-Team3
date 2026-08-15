@@ -2,6 +2,7 @@ from .user import User
 from .driver import Driver
 from .vehicle import Vehicle
 from .shipment import Shipment
+from .shipment_event import ShipmentEvent
 from .trip import Trip
 from .gps_tracking import GPSTracking
 from .maintenance import VehicleMaintenance

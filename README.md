@@ -20,7 +20,7 @@ FleetFlow is a comprehensive Fleet Management System developed using FastAPI, Re
 
 ---
 
-## 🚀 How to Run the Project
+## How to Run the Project
 
 ### 1. Backend Setup
 
@@ -74,28 +74,29 @@ npm install
 npm run dev
 ```
 
-### 3. Simulating Live GPS Tracking
+### 3. Simulating Realistic Live GPS Tracking
 
-To see the **Live Vehicle Tracking** map update with speed, distance, and geofence alerts, you must simulate a vehicle sending live coordinates to the WebSocket server.
+To see the **Live Vehicle Tracking** map update with speed, distance, and geofence alerts, you must simulate a vehicle sending live coordinates to the WebSocket server. Our advanced GPS Simulator automatically pulls active trips and dynamically drives vehicles along their true geographic routes fetched from OSRM!
 
 1. Ensure the backend is running (`uvicorn app.main:app --reload`).
 2. Open a new terminal window.
-3. Run the simulator script:
+3. Run the realistic simulator script:
 ```bash
 cd backend
 # Make sure your virtual environment is activated
 python gps_simulator.py
 ```
-The frontend map will immediately begin showing the simulated vehicle moving along its route, updating speed, distance to destination, and triggering geofence alerts!
+The frontend map will instantly draw massive cross-country highway routes and begin driving the simulated vehicles precisely along their true routes, continuously updating the live ETA and triggering delay alerts if applicable!
 
 ---
 
-## Features Implemented (Milestones 1-3)
+## Features Implemented (Milestones 1-2)
 
 - **Authentication & RBAC:** Secure JWT login for Admin, Fleet Manager, Dispatcher, and Driver roles.
 - **Fleet Management:** Complete vehicle lifecycle and driver assignment.
-- **Shipment & Trip Logistics:** Status tracking (Created → Assigned → In Transit → Delivered).
-- **Live Tracking & Geofencing:** Real-time WebSockets update maps, ETA, distance, and geofence status.
+- **Shipment & Trip Logistics:** Status tracking (Created -> Assigned -> In Transit -> Delivered).
+- **Advanced Route Optimization:** True Geographic Routing via Nominatim & OSRM, generating hyper-accurate polyline routes.
+- **Live Tracking & ETA Alerts:** Real-time WebSockets dynamically track vehicles moving across states, projecting real-time delays and live ETAs directly onto the fleet dashboard map.
 - **Maintenance & Fuel:** Log fuel refills and schedule maintenance.
 - **Analytics Dashboards:** Real-time data on driver performance, fuel trends, maintenance costs, and fleet utilization.
 
