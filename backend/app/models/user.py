@@ -1,11 +1,11 @@
-import uuid
 import enum
-from datetime import datetime
+import uuid
 
-from sqlalchemy import Column, String, DateTime
+from sqlalchemy import Boolean, Column, DateTime, Enum, String
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.sql import func
 
-from app.database import Base
+from database import Base
 
 
 class RoleEnum(str, enum.Enum):
@@ -21,46 +21,62 @@ class User(Base):
     user_id = Column(
         UUID(as_uuid=True),
         primary_key=True,
-        default=uuid.uuid4
+        default=uuid.uuid4,
     )
 
     full_name = Column(
         String(100),
-        nullable=False
+        nullable=False,
     )
 
     email = Column(
         String(100),
         unique=True,
         nullable=False,
-        index=True
+        index=True,
     )
 
     password = Column(
         String(255),
-        nullable=False
+        nullable=False,
     )
 
     phone = Column(
         String(15),
-        nullable=True
+        nullable=True,
     )
 
     role = Column(
-        String(30),
+        Enum(
+            RoleEnum,
+            name="user_role",
+            values_callable=lambda enum_class: [
+                role.value for role in enum_class
+            ],
+        ),
         nullable=False,
-        default=RoleEnum.Driver.value
+        default=RoleEnum.Driver,
     )
+
+    # New accounts must confirm ownership of their email address before login.
+    email_verified = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
+
+    # Never store the actual six-digit code. Store only its SHA-256 hash.
+    verification_code_hash = Column(String(64), nullable=True)
+    verification_code_expires_at = Column(DateTime, nullable=True)
 
     created_at = Column(
         DateTime,
-        default=datetime.utcnow,
-        nullable=False
+        server_default=func.now(),
     )
 
     updated_at = Column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
-        nullable=False
+        server_default=func.now(),
+        onupdate=func.now(),
     )

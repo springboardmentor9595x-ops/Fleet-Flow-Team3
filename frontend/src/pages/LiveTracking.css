@@ -1,0 +1,567 @@
+.tracking-saas-alert,
+.tracking-overview-card,
+.tracking-map-card,
+.tracking-trip-summary,
+.tracking-telemetry-grid article {
+  max-width: 1280px;
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.tracking-saas-alert {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  margin: 0 auto 18px;
+  padding: 15px 18px;
+}
+
+.tracking-saas-alert > span {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 50%;
+  font-weight: 800;
+}
+
+.tracking-saas-alert strong,
+.tracking-saas-alert p {
+  display: block;
+}
+
+.tracking-saas-alert p {
+  margin: 3px 0 0;
+  font-size: 13px;
+}
+
+.tracking-saas-alert.error {
+  border-color: #f1cbd1;
+  background: #fff5f6;
+  color: var(--danger);
+}
+
+.tracking-saas-alert.error > span {
+  background: #ffe1e7;
+}
+
+.tracking-saas-alert.geofence {
+  border-color: #ddd0ff;
+  background: #f8f5ff;
+  color: var(--purple);
+}
+
+.tracking-saas-alert.geofence > span {
+  background: #e9e0ff;
+}
+
+.tracking-overview-card {
+  margin: 0 auto 18px;
+  padding: 23px;
+  animation: tracking-fade-in 0.35s ease;
+}
+
+.tracking-overview-heading,
+.tracking-map-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.tracking-overview-heading p,
+.tracking-map-heading p {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tracking-overview-heading h2,
+.tracking-map-heading h2 {
+  margin: 0;
+  font-size: 19px;
+}
+
+.tracking-connection {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 99px;
+  padding: 7px 10px;
+  background: #efeff4;
+  color: #666577;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.tracking-connection i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #9e9dac;
+}
+
+.tracking-connection.connected {
+  background: #ddf7e8;
+  color: var(--success);
+}
+
+.tracking-connection.connected i {
+  background: #26a562;
+  animation: connection-pulse 1.6s infinite;
+}
+
+.tracking-connection.reconnecting {
+  background: #fff0d9;
+  color: var(--warning);
+}
+
+.tracking-connection.reconnecting i {
+  background: #e3931c;
+  animation: connection-pulse 1.2s infinite;
+}
+
+.tracking-connection.offline {
+  background: #fff0f2;
+  color: var(--danger);
+}
+
+.tracking-connection.offline i {
+  background: #d64f65;
+}
+
+.tracking-overview-grid {
+  display: grid;
+  grid-template-columns: 1.5fr repeat(3, 1fr);
+  gap: 16px;
+  margin-top: 23px;
+}
+
+.tracking-overview-grid > div,
+.tracking-vehicle-select {
+  min-width: 0;
+  padding: 14px;
+  border-radius: 10px;
+  background: #faf9fd;
+}
+
+.tracking-overview-grid span,
+.tracking-vehicle-select span,
+.tracking-trip-summary span {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.tracking-overview-grid strong,
+.tracking-trip-summary strong {
+  display: block;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
+.tracking-vehicle-select {
+  display: grid;
+  gap: 8px;
+}
+
+.tracking-vehicle-select select {
+  width: 100%;
+  border: 1px solid #dfddec;
+  border-radius: 8px;
+  padding: 9px;
+  outline: 0;
+  background: #fff;
+  color: var(--text);
+}
+
+.tracking-vehicle-select select:focus {
+  border-color: var(--purple);
+  box-shadow: 0 0 0 3px #ebe4ff;
+}
+
+.tracking-telemetry-grid {
+  display: grid;
+  max-width: 1280px;
+  margin: 0 auto 18px;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+.tracking-telemetry-grid article {
+  min-height: 145px;
+  padding: 20px;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.tracking-telemetry-grid article:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 25px rgb(51 30 104 / 12%);
+}
+
+.telemetry-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 9px;
+  background: #eee8ff;
+  color: var(--purple);
+  font-size: 17px;
+}
+
+.tracking-telemetry-grid p {
+  margin: 17px 0 5px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.tracking-telemetry-grid strong {
+  color: var(--text);
+  font-size: 21px;
+}
+
+.tracking-telemetry-grid small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.tracking-map-card {
+  margin: 0 auto 18px;
+  padding: 23px;
+  animation: tracking-fade-in 0.45s ease;
+}
+
+.tracking-map-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.route-legend {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.route-legend i {
+  width: 24px;
+  height: 4px;
+  border-radius: 99px;
+  background: #7254d8;
+}
+
+.tracking-map-controls button {
+  border: 1px solid #dfd6fa;
+  border-radius: 8px;
+  padding: 9px 11px;
+  background: #f7f4ff;
+  color: var(--purple);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.tracking-map-frame {
+  position: relative;
+  height: 480px;
+  margin-top: 20px;
+  overflow: hidden;
+  border-radius: 12px;
+  background: #eef0f5;
+}
+
+.tracking-map-frame:fullscreen {
+  width: 100%;
+  height: 100%;
+  padding: 18px;
+  background: #fff;
+}
+
+.tracking-map-frame .leaflet-container {
+  width: 100%;
+  height: 100%;
+}
+
+.tracking-vehicle-icon {
+  display: grid;
+  width: 44px !important;
+  height: 44px !important;
+  place-items: center;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.tracking-vehicle-icon span {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 3px solid #ffffff;
+  border-radius: 50%;
+  background: var(--purple);
+  box-shadow: 0 0 0 0 rgb(114 84 216 / 55%), 0 7px 16px rgb(43 28 94 / 28%);
+  color: white;
+  font-size: 20px;
+  animation: truck-marker-pulse 1.8s infinite;
+}
+
+.tracking-map-loading {
+  position: absolute;
+  z-index: 500;
+  left: 50%;
+  top: 50%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transform: translate(-50%, -50%);
+  border-radius: 99px;
+  padding: 11px 15px;
+  background: #ffffffeb;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: 0 8px 20px #1b143326;
+}
+
+.tracking-map-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #e3dcfb;
+  border-top-color: var(--purple);
+  border-radius: 50%;
+  animation: tracking-spin 0.8s linear infinite;
+}
+
+.fleet-marker-pulse {
+  animation: marker-pulse 1.8s infinite;
+}
+
+.tracking-trip-summary {
+  display: grid;
+  max-width: 1280px;
+  margin: 0 auto;
+  grid-template-columns: 1.1fr repeat(6, minmax(0, 1fr));
+  gap: 12px;
+  padding: 20px;
+}
+
+.tracking-progress-card {
+  max-width: 1280px;
+  margin: 0 auto 18px;
+  padding: 20px 23px;
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.tracking-progress-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.tracking-progress-heading p {
+  margin: 0 0 5px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tracking-progress-heading strong {
+  font-size: 14px;
+}
+
+.tracking-progress-heading strong span {
+  margin: 0 7px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.tracking-progress-heading b {
+  color: var(--purple);
+  font-size: 20px;
+}
+
+.tracking-progress-track {
+  height: 10px;
+  margin-top: 17px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: #eeeafb;
+}
+
+.tracking-progress-track i {
+  display: block;
+  height: 100%;
+  min-width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #8f74ee, #5e3dc5);
+  transition: width 0.8s ease;
+}
+
+.tracking-progress-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.tracking-trip-summary div {
+  min-width: 0;
+  padding-right: 10px;
+  border-right: 1px solid #eeeeF3;
+}
+
+.tracking-trip-summary div:last-child {
+  border-right: 0;
+}
+
+@keyframes tracking-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes tracking-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(7px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes marker-pulse {
+  0% {
+    stroke-width: 3;
+    opacity: 1;
+  }
+
+  50% {
+    stroke-width: 9;
+    opacity: 0.62;
+  }
+
+  100% {
+    stroke-width: 3;
+    opacity: 1;
+  }
+}
+
+@keyframes connection-pulse {
+  0% {
+    box-shadow: 0 0 0 0 currentColor;
+  }
+
+  70% {
+    box-shadow: 0 0 0 7px transparent;
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+@keyframes truck-marker-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgb(114 84 216 / 55%), 0 7px 16px rgb(43 28 94 / 28%);
+  }
+
+  70% {
+    box-shadow: 0 0 0 12px rgb(114 84 216 / 0%), 0 7px 16px rgb(43 28 94 / 28%);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgb(114 84 216 / 0%), 0 7px 16px rgb(43 28 94 / 28%);
+  }
+}
+
+@media (max-width: 1100px) {
+  .tracking-overview-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .tracking-telemetry-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .tracking-trip-summary {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .tracking-trip-summary div:nth-child(4) {
+    border-right: 0;
+  }
+}
+
+@media (max-width: 760px) {
+  .tracking-overview-heading,
+  .tracking-map-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .tracking-map-controls {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .tracking-map-frame {
+    height: 350px;
+  }
+
+  .tracking-progress-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .tracking-trip-summary {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .tracking-trip-summary div {
+    border-right: 0;
+    border-bottom: 1px solid #eeeeF3;
+    padding: 8px 0;
+  }
+}
+
+@media (max-width: 480px) {
+  .tracking-overview-grid,
+  .tracking-telemetry-grid,
+  .tracking-trip-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .tracking-map-frame {
+    height: 300px;
+  }
+
+  .tracking-trip-summary div:last-child {
+    border-bottom: 0;
+  }
+}

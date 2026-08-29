@@ -4,6 +4,13 @@ import { BrowserRouter } from "react-router-dom";
 
 import App from "./App";
 import "./index.css";
+import "./styles/theme.css";
+import "./styles/components.css";
+import "./styles/layout.css";
+import "./styles/theme.css";
+import "./styles/components.css";
+import "./styles/layout.css";
+
 import { AuthProvider } from "./context/AuthContext";
 
 ReactDOM.createRoot(document.getElementById("root")).render(

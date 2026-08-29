@@ -1,0 +1,29 @@
+.profile-page { min-height: 100vh; padding: 32px; background: #f4f7fb; color: #172033; font-family: Arial, sans-serif; }
+.profile-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; max-width: 780px; margin-bottom: 24px; }
+.profile-header h1 { margin: 0; font-size: 30px; }
+.profile-header p { margin: 8px 0 0; color: #66758a; }
+.profile-header .back-link { color: #2459a7; font-size: 14px; font-weight: 700; text-decoration: none; }
+.profile-card { max-width: 780px; margin-bottom: 18px; padding: 25px; border: 1px solid #e0e7f0; border-radius: 12px; background: #ffffff; }
+.profile-card h2 { margin: 0 0 18px; font-size: 19px; }
+.profile-card form { display: grid; gap: 17px; }
+.profile-card label { display: grid; gap: 8px; color: #344258; font-size: 14px; font-weight: 700; }
+.profile-card input { width: 100%; padding: 11px 12px; border: 1px solid #ced8e5; border-radius: 8px; background: #ffffff; color: #172033; font: inherit; }
+.profile-card input:focus { outline: 3px solid #dceaff; border-color: #3572c5; }
+.profile-button { width: fit-content; padding: 11px 16px; border: 0; border-radius: 8px; background: #2459a7; color: #ffffff; cursor: pointer; font: inherit; font-weight: 700; }
+.profile-button:hover { background: #194781; }
+.profile-button:disabled { cursor: wait; opacity: 0.65; }
+.success-message, .error-message { max-width: 780px; margin-bottom: 18px; padding: 12px; border-radius: 8px; }
+.success-message { background: #dcf7e7; color: #176e3b; }
+.error-message { background: #fff0f1; color: #b2293b; }
+.password-input { display: flex; gap: 9px; }
+.password-input input { flex: 1; }
+.show-password-button { min-width: 62px; border: 1px solid #ced8e5; border-radius: 8px; background: #f8fafd; color: #2459a7; cursor: pointer; font-weight: 700; }
+.password-match { margin: -6px 0 0; color: #187640; font-size: 13px; }
+.password-mismatch { margin: -6px 0 0; color: #b2293b; font-size: 13px; }
+
+@media (max-width: 650px) {
+  .profile-page { padding: 20px; }
+  .profile-header { align-items: flex-start; flex-direction: column; }
+  .password-input { flex-direction: column; }
+  .show-password-button { min-height: 38px; }
+}

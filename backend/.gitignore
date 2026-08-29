@@ -1,4 +1,21 @@
-venv/
+# Secrets
 .env
+.env.*
+!.env.example
+
+# Python virtual environment
+venv/
+
+# Python cache files
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+
+# Test and coverage output
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editor files
+.vscode/
+.idea/
